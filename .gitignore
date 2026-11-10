@@ -1,0 +1,24 @@
+# generated / personal data — never commit these
+build/
+dist/
+demo/
+hw/
+samples/
+profiles/
+bin/
+.venv/
+.venv*/
+__pycache__/
+*.pyc
+*.pyo
+
+# generated fonts and documents (may contain someone's handwriting)
+*.ttf
+*.otf
+*.pdf
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
