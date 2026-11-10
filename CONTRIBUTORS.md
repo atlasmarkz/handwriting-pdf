@@ -6,9 +6,9 @@
 - 提供字迹样本（手写作业 PDF），逐轮给出观感反馈（粗细、纸型、行距、墨色）；
 - 仓库所有者、最终决策与发布。
 
-## DeepSeek Harness Agent (deepseek-v4.1-flash)
+## DeepSeek AI（deepseek-v4.1-flash，运行于 DeepSeek Harness）
 
-以 AI 协作方身份参与（无 GitHub 账号，因此不出现在 Collaborators 列表中，以此文件与 commit trailer 记录贡献）：
+以 AI 协作方身份参与（模型本身没有 GitHub 账号，因此不出现在 Collaborators 列表中，以此文件与 commit trailer 记录贡献）：
 
 - **调研**：横向比对 DSH 插件市场（10,119 条）、skills.sh 生态、开源笔迹合成/少样本字体项目与国内成品工具，确认"没有开箱即用方案"，并给出可组合路线；
 - **设计**：确定"练习纸四角定位 → 透视矫正 → 按格取字 → 轮廓矢量化 → TTF → ReportLab 排版"的管线，以及"PDF 三条入口（嵌入字体 / 文字层收割 / 扫描图）"；
@@ -25,5 +25,7 @@
 ```
 feat: ...
 
-Co-authored-by: DeepSeek Harness Agent <agent@deepseek-harness.local>
+Co-authored-by: DeepSeek AI <agent@dsh.local>
 ```
+
+`agent@dsh.local` 是一个明确非官方的占位地址：模型没有邮箱账号，也不应冒用 DeepSeek 官方域名。GitHub 只有在邮箱绑定账号时才会显示头像/链接，所以这里显示为纯文本署名。

@@ -110,7 +110,7 @@ references/            细节流程与排错
 | 角色 | 贡献者 |
 |---|---|
 | 需求、字迹样本、验收 | [atlasmarkz](https://github.com/atlasmarkz) |
-| 调研、设计、实现、测试、文档 | DeepSeek Harness Agent（deepseek-v4.1-flash） |
+| 调研、设计、实现、测试、文档 | DeepSeek AI（deepseek-v4.1-flash） |
 
 详见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。本项目由人类与 AI agent 协作完成：agent 起草并验证，仓库所有者复核后发布。
 
