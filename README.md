@@ -1,4 +1,4 @@
-<h1 align="center"><img src="docs/logo.png" width="54" align="middle"> handwriting-pdf</h1>
+<h1 align="center"><img src="docs/logo-mark.png" width="38" align="bottom" hspace="12"> handwriting-pdf</h1>
 
 <p align="center">
   <b>把照片里的字迹，变成一份能打印的手写稿</b><br>
