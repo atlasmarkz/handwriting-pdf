@@ -1,13 +1,6 @@
-<table>
-<tr>
-<td width="88" valign="middle"><img src="docs/logo.png" width="64" alt="handwriting-pdf logo"></td>
-<td valign="middle">
+<img align="left" width="64" hspace="14" src="docs/logo.png" alt="handwriting-pdf logo">
 
 # handwriting-pdf
-
-</td>
-</tr>
-</table>
 
 照片字迹 → 可安装字体（.ttf）→ 手写风格 PDF。本地运行，不上传任何数据。
 Work in Codex (`~/.codex/skills`) and DeepSeek Harness / DSH (`~/.agents/skills`).
