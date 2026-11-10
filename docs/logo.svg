@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="handwriting-pdf: a page with a handwritten signature">
+  <title>handwriting-pdf</title>
+  <defs>
+    <linearGradient id="ink" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#1C4A86"/>
+      <stop offset="1" stop-color="#3F8CD8"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F1F5FB"/>
+    </linearGradient>
+  </defs>
+
+  <!-- page with a folded corner -->
+  <path d="M130 64 H324 L408 148 V422 A26 26 0 0 1 382 448 H130 A26 26 0 0 1 104 422 V90 A26 26 0 0 1 130 64 Z"
+        fill="url(#paper)" stroke="#1B2432" stroke-width="14" stroke-linejoin="round"/>
+  <path d="M324 64 V148 H408 Z" fill="#DCE3EE" stroke="#1B2432" stroke-width="14" stroke-linejoin="round"/>
+
+  <!-- ruled lines -->
+  <g stroke="#D7DEEA" stroke-width="12" stroke-linecap="round">
+    <line x1="150" y1="188" x2="356" y2="188"/>
+    <line x1="150" y1="232" x2="300" y2="232"/>
+  </g>
+
+  <!-- one-stroke handwritten signature: ascender loop, down stroke, shoulder, rising tail -->
+  <path d="M146 392
+           C 170 372 176 318 190 262
+           C 202 214 232 186 246 200
+           C 260 214 246 244 226 262
+           C 206 280 190 300 184 330
+           C 178 360 196 376 216 366
+           C 246 350 262 306 288 292
+           C 310 280 330 288 336 310
+           C 342 332 366 330 372 308"
+        fill="none" stroke="url(#ink)" stroke-width="24"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

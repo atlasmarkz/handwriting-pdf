@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" width="148" alt="handwriting-pdf logo: a document page with a handwritten signature">
+</p>
+
 # handwriting-pdf
 
 照片字迹 → 可安装字体（.ttf）→ 手写风格 PDF。本地运行，不上传任何数据。
