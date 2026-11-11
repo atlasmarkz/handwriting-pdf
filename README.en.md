@@ -45,7 +45,7 @@ Printing tips: **A4 / 100% scale**, a dark pen (0.5 mm+), one character per cell
 
 ## Two sources of style: a ready-made font, or your own sample
 
-<p align="center"><img src="docs/poc/style-paths.png" width="720" alt="A ready-made font and a user sample side by side"></p>
+<p align="center"><img src="docs/poc/style-paths-en.png" width="720" alt="A ready-made font and a user sample side by side"></p>
 
 | Source | How | Good for |
 |---|---|---|
@@ -64,21 +64,19 @@ hwpdf render --profile my-hand --text-file doc.txt -o out.pdf
 
 With no `--jitter` the measured value is used: a typeset face (Hei/Song) lands around 0.35, a real running script 1.5–2.0. Fonts stay local; downloads are always explicit, and system fonts work with no network at all.
 
-<p align="center"><img src="docs/poc/canned-fonts.png" width="620" alt="the same passage set in three OFL handwriting fonts"></p>
+<p align="center"><img src="docs/poc/canned-fonts-en.png" width="620" alt="the same letter set in three OFL handwriting fonts"></p>
 
-All three blocks above are the same 《兰亭序》 passage set with nothing but the font itself — **no seam, because every glyph comes from that font**. `--font` takes any TTF/OTF/TTC (including a font you made elsewhere); `--font-name` only knows the three in the catalog.
+All three blocks above are the same short letter set with nothing but the font itself — **no seam, because every glyph comes from that font**. `--font` takes any TTF/OTF/TTC (including a font you made elsewhere); `--font-name` only knows the three in the catalog.
 
 ## Write a few characters, set a whole page (optional)
 
 `synth` estimates slant, stroke weight and proportions from the characters you wrote, then stamps them onto a system skeleton — so characters you never wrote still come out in your manner. Pure CPU, no download, no network.
 
-<p align="center"><img src="docs/poc/stylefit-page.png" width="680" alt="A mixed Chinese/English page set with 7 handwritten letters plus synthesised glyphs"></p>
-
-<p align="center"><img src="docs/poc/mixed-line.png" width="720" alt="one line: the first half is the original hand, the second half is synthesised"></p>
+<p align="center"><img src="docs/poc/demo-en.png" width="680" alt="A letter set from 7 real letters plus synthesised glyphs"></p>
 
 - One command: `hwpdf synth build --style your-hand.ttf --charset cjk -o synth.ttf` (3755 characters in about 10 s)
 - Stroke weight can be overridden: `synth build --weight -1…2` (the default is measured from your sample)
-- In the line above, 永和九年，岁在癸丑 is the original hand and 暮春之初，会于会稽 is synthesised — **the seam is visible**: the CJK skeleton is a sans face, and macOS ships no handwritten CJK skeleton
+- English hides the seam better than Chinese: the Latin skeleton (Bradley Hand) is itself a handwriting face, so synthesised letters read as the same hand. For CJK the skeleton is a sans face — macOS ships no handwritten CJK skeleton — so the seam stays visible (see the Chinese README for that comparison)
 - It is **not** style transfer: structure comes from a system sans-serif skeleton, only your slant and stroke weight are carried over; plug in a real model through `--engine external --provider`
 - Details, measured numbers and known limits: [docs/poc/stylefit.md](docs/poc/stylefit.md)
 

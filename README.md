@@ -72,7 +72,7 @@ hwpdf render --profile 我的字 --text-file doc.txt -o out.pdf
 
 `synth` 用你写过的字估计倾斜、笔宽与比例，再印到系统骨架上——没写过的字也能按你的样子排出来。纯 CPU、不下载、不联网。
 
-<p align="center"><img src="docs/poc/stylefit-page.png" width="680" alt="7 个手写字母 + 合成字排出的中英混排页面"></p>
+<p align="center"><img src="docs/poc/demo-zh.png" width="680" alt="8 个真实汉字 + 合成字排出的中文页面"></p>
 
 <p align="center"><img src="docs/poc/mixed-line.png" width="720" alt="一行里前半是原笔迹、后半是合成字"></p>
 
