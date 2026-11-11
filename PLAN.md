@@ -133,7 +133,7 @@
 | **S5** profile/charset 集成 | 与现有工作流合体 | profile `type: synth`（记录 style hash、引擎、参数）、`--charset` 常用字预生成、缺字按需生成 | `hwpdf render` 直接吃 synth profile；同一 profile 二次渲染不触发推理 |
 | **S6** 评测与文档 | 可发布、可复现 | 自动指标脚本（SSIM/缺字率/12pt 可读性）、SKILL.md 增补、许可与隐私说明 | 指标脚本一条命令出报告；文档明确"默认本地、权重不入库" |
 
-当前状态：S0–S3 完成，S5 主体完成，S6 进行中（`tests/test_synth.py`、`scripts/eval_synth.py`、`docs/poc/stylefit.md`、`SKILL.md` 的 synth 章节已落地；许可与隐私说明见 README）；S4 等两件用户决策（用哪个模型/权重许可 + 有无独显），期间用 `stylefit` 解析式基线顶上。
+当前状态：**S0–S3、S5、S6 完成**，S4 等两件用户决策（用哪个模型/权重许可 + 有无独显），期间用 `stylefit` 解析式基线顶上。S6 交付：`hwpdf synth eval`（一条命令出报告：覆盖率 / 质量门 / 原样复用 IoU / 倾角 / 笔宽）、`tests/test_synth.py`（11 例）、`.github/workflows/ci.yml`、`docs/poc/stylefit.md`、`SKILL.md` 的 synth 章节；12pt 可读性仍是人工目检（`synth specimen` / `preview`），不做自动判分。
 
 **S3 落地细节**：质量门（`GATE`：墨量 1.2%–62%、包围盒 ≥28% 边长、贴边即裁切）+ 失败自动重采样（`--retries`，默认 1，换 seed 重画）；`meta.gate` 记录 passed/rejected/retried/attempts 与阈值；缓存 key = `engine.name.version|size|seed|SCHEMA_VERSION`，引擎 `version` 一改就自动失效；`hwpdf synth verify --font` 报覆盖率；`--no-cache` 用于基准测试。
 
