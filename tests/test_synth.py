@@ -165,3 +165,23 @@ class GlyphSourceTests(unittest.TestCase):
                 del os.environ["HWPDF_SKELETON"]
             else:
                 os.environ["HWPDF_SKELETON"] = old
+
+
+class ExtendTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name) / "f.ttf"
+        synth.build(None, "AB", self.out, engine="stub", cache=False, style_required=False)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_extend_keeps_the_old_glyphs_and_adds_new_ones(self):
+        meta = synth.extend(self.out, None, "C", engine="stub", cache=False)
+        self.assertEqual(meta["added"], "C")
+        self.assertTrue({ord("A"), ord("B"), ord("C")} <= synth.glyphs_of(self.out))
+
+    def test_extend_is_a_noop_when_everything_exists(self):
+        meta = synth.extend(self.out, None, "A", engine="stub", cache=False)
+        self.assertEqual(meta["added"], "")
+        self.assertEqual(synth.glyphs_of(self.out), synth.glyphs_of(self.out))

@@ -308,6 +308,24 @@ def _parse_ink(s: str):
     return (0.10, 0.11, 0.14)
 
 
+def _grow_synth(text: str, real_font: str, synth_font: str, engine: str | None = None) -> str:
+    """Add characters the synth font cannot draw yet, then hand back its path."""
+    import synth as synth_mod
+
+    body = synth_mod.glyphs_of(Path(real_font))
+    made = synth_mod.glyphs_of(Path(synth_font))
+    need: list[str] = []
+    for ch in unique_chars(text):
+        if not ch.strip() or ord(ch) in body or ord(ch) in made or ch in need:
+            continue
+        need.append(ch)
+    if not need:
+        return synth_font
+    info(f"growing synth font with {len(need)} character(s): {''.join(need)[:60]}")
+    synth_mod.extend(Path(synth_font), Path(real_font), "".join(need), out=Path(synth_font), engine=engine)
+    return synth_font
+
+
 def cmd_render(args) -> int:
     text = text_from(args.text_file, args.text)
     if args.md:
@@ -339,6 +357,8 @@ def cmd_render(args) -> int:
         # the profile carries a synthesized font: use it for the characters you never wrote
         fallback = synth["font_file"]
         info(f"synth fallback: {synth.get('engine', '?')} -> {fallback}")
+        if args.grow:
+            fallback = _grow_synth(text, font_path, fallback, synth.get("engine"))
     res = render_mod.render(
         text,
         font_path,
@@ -627,6 +647,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--paper", choices=["ruled", "grid", "none"], default=None)
     r.add_argument("--ink", default=None)
     r.add_argument("--fallback", default=None, help="auto | none | path to a TTF")
+    r.add_argument("--grow", action="store_true",
+                   help="extend the profile's synth font with characters it is missing, then render")
     r.add_argument("--title")
     r.set_defaults(func=cmd_render)
 

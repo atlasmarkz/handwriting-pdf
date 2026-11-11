@@ -75,11 +75,19 @@ def charsets() -> dict[str, str]:
     }
 
 
+def _is_file(s: str) -> bool:
+    """`Path(...).is_file()` raises ENAMETOOLONG on a long literal charset; that just means no."""
+    try:
+        return Path(s).is_file()
+    except OSError:
+        return False
+
+
 def resolve_charset(spec: str | None) -> list[str]:
     if not spec:
         die("need --charset (try `hwpdf synth charsets`)")
     s = spec.strip()
-    if s.startswith("@") or s.startswith("file:") or (len(s) > 1 and Path(s).is_file()):
+    if s.startswith("@") or s.startswith("file:") or (len(s) > 1 and _is_file(s)):
         if s.startswith("file:"):
             path = Path(s.split(":", 1)[1])
         elif s.startswith("@"):
@@ -349,6 +357,12 @@ def glyphs_of(font_path: Path, index: int = 0) -> set[int]:
         except Exception:
             _CMAP_CACHE[key] = set()
     return _CMAP_CACHE[key]
+
+
+def _forget_cmap(font_path: Path) -> None:
+    prefix = f"{font_path}#"
+    for key in [k for k in _CMAP_CACHE if k.startswith(prefix)]:
+        del _CMAP_CACHE[key]
 
 
 def _draw(font: ImageFont.FreeTypeFont, ch: str, size: int, baseline: float | None = None) -> np.ndarray:
@@ -707,6 +721,8 @@ def build(
     glyphs.setdefault(" ", {"mask": np.zeros((2, 2), np.uint8), "bbox": [0, 0, 2, 2]})
 
     report = fontbuild.build(glyphs, out, family=family, smooth=smooth, tracking=tracking)
+    # a rewritten path must not keep serving the cmap we read before the rebuild
+    _forget_cmap(out)
     meta = {
         "version": SCHEMA_VERSION,
         "engine": eng.name,
@@ -927,6 +943,60 @@ def cmd_eval(a) -> int:
     return eval_synth.main(list(a.args))
 
 
+def extend(font: Path, style: Path | None, chars: str, *, out: Path | None = None,
+           engine: str | None = None, seed: int = 0, size: int = CANVAS,
+           cache: bool = True) -> dict:
+    """Add characters to an existing synthesized font, keeping the ones it already has.
+
+    The font is rebuilt (per-glyph cache makes this cheap): glyphs you wrote stay verbatim,
+    previously synthesized ones come back from cache, only the new characters cost time.
+    """
+    font = Path(font)
+    have = glyphs_of(font)
+    if not have:
+        die(f"{font} has no character map; build a font first with `hwpdf synth build`")
+    want = [c for c in chars if c.strip()]
+    seen: set[str] = set()
+    need: list[str] = []
+    for ch in want:
+        if ord(ch) not in have and ch not in seen:
+            seen.add(ch)
+            need.append(ch)
+    if not need:
+        info(f"nothing to add: every one of {len(want)} character(s) is already in {font}")
+        return {"added": "", "font": str(font), "built": len(have)}
+    info(f"adding {len(need)} character(s): {''.join(need)[:60]}{'…' if len(need) > 60 else ''}")
+    union = "".join(chr(cp) for cp in sorted(have) if chr(cp).strip()) + "".join(need)
+    dest = Path(out or font)
+    meta = build(style, union, dest, engine=engine, seed=seed, size=size, cache=cache, with_punct=False)
+    meta["extended_from"] = str(font)
+    meta["added"] = "".join(need)
+    util.save_json(Path(str(dest) + ".json"), meta)
+    info(f"font: {dest}  (now {meta.get('built')} glyphs, +{len(need)})")
+    return meta
+
+
+def cmd_extend(args) -> int:
+    font = Path(args.font)
+    if not font.exists():
+        die(f"font not found: {font}")
+    side = Path(str(font) + ".json")
+    recorded: dict = {}
+    if side.exists():
+        try:
+            recorded = util.load_json(side) or {}
+        except Exception:
+            recorded = {}
+    style = Path(args.style) if args.style else None
+    if style is None and recorded.get("style") and Path(recorded["style"]).exists():
+        style = Path(recorded["style"])
+        info(f"style sample from {side.name}: {style}")
+    engine = args.engine or recorded.get("engine")
+    chars = "".join(resolve_charset(args.chars))
+    return 0 if extend(font, style, chars, out=args.out, engine=engine,
+                       seed=args.seed, cache=not args.no_cache).get("built") else 1
+
+
 def main(argv=None) -> int:
     import argparse
 
@@ -973,6 +1043,15 @@ def main(argv=None) -> int:
     sp.add_argument("--cols", type=int, default=12)
     sp.add_argument("--cell", type=int, default=120)
     sp.set_defaults(func=cmd_specimen)
+    x = sub.add_parser("extend", help="add characters to a built font without rebuilding from scratch")
+    x.add_argument("--font", required=True)
+    x.add_argument("--chars", required=True, help="characters to add (literal, @file, or a named charset)")
+    x.add_argument("--style", default=None, help="default: the style sample recorded in <font>.json")
+    x.add_argument("--engine", default=None)
+    x.add_argument("--seed", type=int, default=0)
+    x.add_argument("--out", default=None, help="write here instead of updating --font in place")
+    x.add_argument("--no-cache", action="store_true")
+    x.set_defaults(func=cmd_extend)
     ev = sub.add_parser("eval", help="measure a built font (coverage, gate, IoU, slant, weight)")
     ev.add_argument("args", nargs=argparse.REMAINDER,
                     help="options for scripts/eval_synth.py, e.g. --font f.ttf --real r.ttf")
