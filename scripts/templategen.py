@@ -10,45 +10,31 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from util import ensure_dir, is_cjk, save_json, unique_chars, warn
+import fonts
 
 GUIDE_GREY = (0.78, 0.78, 0.78)
 GRID_GREY = (0.87, 0.87, 0.87)
 FID_SIZE = 17.0  # 6 mm
 MARGIN = 40.0
 FID_INSET = 14.0
+GUIDE_PUNCT = "，。！？；：、（）《》“”‘’…—"
 
-CJK_FONT_CANDIDATES = [
-    r"C:\Windows\Fonts\simkai.ttf",
-    r"C:\Windows\Fonts\STKAITI.TTF",
-    r"C:\Windows\Fonts\msyh.ttc",
-    "/System/Library/Fonts/PingFang.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-]
-LATIN_FONT_CANDIDATES = [
-    r"C:\Windows\Fonts\Inkfree.ttf",
-    r"C:\Windows\Fonts\segoesc.ttf",
-    "/System/Library/Fonts/Supplemental/Bradley Hand Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
-]
+def _register(kind: str, name: str, chars: str = ""):
+    """Register the best usable system font for `kind` under `name` (see fonts.py)."""
+    spec = fonts.find_for(kind, chars)
+    if not spec:
+        return None
+    try:
+        pdfmetrics.registerFont(TTFont(name, spec["path"], subfontIndex=spec["index"]))
+    except Exception:
+        return None
+    return name
 
 
-def _register(candidates, name: str):
-    for path in candidates:
-        if not Path(path).exists():
-            continue
-        try:
-            pdfmetrics.registerFont(TTFont(name, path))
-            return name
-        except Exception:
-            continue
-    return None
-
-
-def _guide_fonts():
+def _guide_fonts(chars: str = ""):
     return {
-        "cjk": _register(CJK_FONT_CANDIDATES, "HWGuideCJK"),
-        "latin": _register(LATIN_FONT_CANDIDATES, "HWGuideLatin"),
+        "cjk": _register("cjk", "HWGuideCJK", chars),
+        "latin": _register("latin", "HWGuideLatin", chars),
     }
 
 
@@ -69,9 +55,16 @@ def generate(chars: list[str], out_pdf, out_json, cols: int = 5, rows: int = 6, 
     page_w, page_h = A4
     per_page = cols * rows
     pages: list[list[str]] = [chars[i : i + per_page] for i in range(0, len(chars), per_page)] or [[]]
-    fonts = _guide_fonts()
-    if fonts["cjk"] is None and any(is_cjk(c) for c in chars):
+    guide = _guide_fonts("".join(chars))
+    if guide["cjk"] is None and any(is_cjk(c) for c in chars):
         warn("no CJK guide font found: Chinese guide glyphs are omitted (write the character shown by the index)")
+    for kind in ("cjk", "latin"):
+        group = "".join(c for c in chars if (is_cjk(c) or c in GUIDE_PUNCT) == (kind == "cjk"))
+        spec = fonts.find_for(kind, group)
+        if spec and group:
+            missing = sorted({c for c in group if not fonts.covers(spec, c)})
+            if missing:
+                warn(f"{kind} guide font misses {len(missing)} char(s): {''.join(missing)[:40]}")
 
     fid_centers = _fiducials(page_w, page_h, cols, cell, gap)
     grid_w = cols * cell + (cols - 1) * gap
@@ -109,7 +102,7 @@ def generate(chars: list[str], out_pdf, out_json, cols: int = 5, rows: int = 6, 
             c.setFillGray(0.35)
             c.setFont("Helvetica", 5)
             c.drawCentredString(x + cell / 2, y - 5.5, str(pi * per_page + idx + 1))
-            font = fonts["cjk"] if (is_cjk(ch) or ch in "，。！？；：、（）《》“”‘’…—") else fonts["latin"]
+            font = guide["cjk"] if (is_cjk(ch) or ch in GUIDE_PUNCT) else guide["latin"]
             if font:
                 size = cell * (0.72 if is_cjk(ch) else 0.62)
                 c.setFillColorRGB(*GUIDE_GREY)

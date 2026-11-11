@@ -118,3 +118,19 @@
 1. 你提供 26 字母 + 10 数字样张（现有练习纸即可，或从线代笔记里挑干净的字格）；
 2. 我跑 P1 的 FontDiffuser / Diff-Font demo，出 30 字样张；
 3. 效果可接受 → 进 P2 打通"生成 → TTF → PDF"；否则保留 v0.1 逐字路线。
+
+## 8. 工程实施步骤（S0–S6，逐步交付）
+
+原则：**默认路径不被污染**——v0.1（拍照→矢量化→TTF→PDF）保持零重依赖；synth 是可选第二引擎，所有重依赖惰性导入，缺失时给可执行的修复提示而不是崩溃。
+
+| 步骤 | 目标 | 主要交付物 | 验收 |
+|---|---|---|---|
+| **S0** 基线对齐 | 让"机器能跑"可复现，修掉静默退化 | `scripts/fonts.py`（系统字体探测+缓存）、doctor 报告实际选中字体、模板按字数校验覆盖率 | `doctor` 显示真实 cjk/latin guide 与 `#index`；中文练习纸渲染出描红而非空白格；中英文 selftest 均通过 |
+| **S1** synth 骨架 | 子命令、参数、错误路径先立住，不接真模型 | `scripts/synth.py`（engine 协议 + `stub` 引擎 + `doctor`）、`hwpdf synth ...`、`requirements-synth.txt` | `hwpdf synth doctor` 在无 torch 时给出安装指引并返回非零；`synth build --engine stub` 产出可装载的 TTF |
+| **S2** 管线打通 | style 图 → 字形图 → 复用矢量化 → TTF → PDF | `synth.build()`，接 `vectorize.py`/`fontbuild.py`，字表解析（ASCII/common3500/自定义） | 用 stub 引擎跑通端到端，PDF 里出现"生成"字形 |
+| **S3** 质量门与缓存 | 坏字形不进字体；重复调用零成本 | 每字质量评分（墨量/包围盒/连通域/结构相似）+ 失败即重采样或回退并告警；缓存 key = style hash + 字表 + 模型版本 | 故意喂空白/噪点图片，坏字被拒并回退，日志列出原因；二次运行命中缓存 |
+| **S4** 真实模型 PoC | 验证"像不像本人" | `synth` 引擎 `diff-font`（或 FontDiffuser）适配层 + `docs/poc/` 对比图 | 30 字样张人工盲测，记录可读性/结构崩坏率，给继续或放弃的书面结论 |
+| **S5** profile/charset 集成 | 与现有工作流合体 | profile `type: synth`（记录 style hash、引擎、参数）、`--charset` 常用字预生成、缺字按需生成 | `hwpdf render` 直接吃 synth profile；同一 profile 二次渲染不触发推理 |
+| **S6** 评测与文档 | 可发布、可复现 | 自动指标脚本（SSIM/缺字率/12pt 可读性）、SKILL.md 增补、许可与隐私说明 | 指标脚本一条命令出报告；文档明确"默认本地、权重不入库" |
+
+当前状态：S0 完成；S1 进行中。

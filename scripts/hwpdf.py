@@ -24,6 +24,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import imaging  # noqa: E402
+import fonts as fonts_mod  # noqa: E402
 import fontbuild  # noqa: E402
 import pdfin  # noqa: E402
 import profile as profile_mod  # noqa: E402
@@ -74,12 +75,13 @@ def cmd_doctor(args) -> int:
         print("pymupdf     ok (preview enabled)")
     except Exception:
         print("pymupdf     missing (optional, only used by `preview`)")
-    for label, paths in (
-        ("cjk guide", templategen.CJK_FONT_CANDIDATES),
-        ("latin guide", templategen.LATIN_FONT_CANDIDATES),
-    ):
-        found = [p for p in paths if Path(p).exists()]
-        print(f"{label:11s} {found[0] if found else 'NONE FOUND'}")
+    for row in fonts_mod.report():
+        label = f"{row['kind']} guide"
+        if row["path"]:
+            print(f"{label:11s} {row['path']}" + (f"#{row['index']}" if row["index"] else ""))
+        else:
+            ok = False
+            print(f"{label:11s} NONE FOUND")
     print("status      " + ("ok" if ok else "INCOMPLETE - pip install -r requirements.txt"))
     return 0 if ok else 1
 
@@ -305,12 +307,11 @@ def cmd_render(args) -> int:
         die("need --font <path> or --profile <name>")
     if font_path.lower().startswith("system"):
         want_latin = "latin" in font_path.lower()
-        cands = render_mod.FALLBACK_LATIN if want_latin else render_mod.FALLBACK_CJK
-        found = next((p for p in cands if Path(p).exists()), None)
-        if not found:
+        spec = fonts_mod.find("latin" if want_latin else "cjk")
+        if not spec:
             die(f"no system font found for {font_path}")
-        font_path = found
-        info(f"using system font: {font_path} (not the user's handwriting)")
+        font_path = spec["path"]
+        info(f"using system font: {font_path}" + (f"#{spec['index']}" if spec["index"] else "") + " (not the user's handwriting)")
     if not Path(font_path).exists():
         die(f"font not found: {font_path}")
     size = args.size if args.size is not None else defaults.get("size", 12.0)
@@ -465,13 +466,12 @@ def cmd_selftest(args) -> int:
         dr.rectangle([cx * scale - s, (meta["page_size"][1] - cy) * scale - s, cx * scale + s, (meta["page_size"][1] - cy) * scale + s], fill=(0, 0, 0))
 
     def font_for(ch):
-        cand = templategen.CJK_FONT_CANDIDATES if is_cjk(ch) else templategen.LATIN_FONT_CANDIDATES
-        for p in cand:
-            if Path(p).exists():
-                try:
-                    return ImageFont.truetype(p, int(args.cell * 0.62 * scale))
-                except Exception:
-                    continue
+        spec = fonts_mod.find("cjk" if is_cjk(ch) else "latin")
+        if spec:
+            try:
+                return ImageFont.truetype(spec["path"], int(args.cell * 0.62 * scale), index=spec["index"])
+            except Exception:
+                pass
         return None
 
     import random

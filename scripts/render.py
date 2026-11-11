@@ -13,18 +13,7 @@ from reportlab.pdfgen import canvas
 
 from util import is_cjk, warn
 
-FALLBACK_CJK = [
-    r"C:\Windows\Fonts\simkai.ttf",
-    r"C:\Windows\Fonts\msyh.ttc",
-    r"C:\Windows\Fonts\STKAITI.TTF",
-    "/System/Library/Fonts/PingFang.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-]
-FALLBACK_LATIN = [
-    r"C:\Windows\Fonts\Inkfree.ttf",
-    r"C:\Windows\Fonts\segoesc.ttf",
-    "/System/Library/Fonts/Supplemental/Bradley Hand Bold.ttf",
-]
+import fonts
 
 _pdf_fonts: dict[str, str] = {}
 
@@ -33,12 +22,12 @@ def cmap_of(path) -> set[int]:
     return set(FTFont(str(path), fontNumber=0).getBestCmap().keys())
 
 
-def register(path, name: str) -> str | None:
-    key = f"{name}:{Path(path).resolve()}"
+def register(path, name: str, index: int = 0) -> str | None:
+    key = f"{name}:{Path(path).resolve()}#{index}"
     if key in _pdf_fonts:
         return _pdf_fonts[key]
     try:
-        pdfmetrics.registerFont(TTFont(name, str(path), subfontIndex=0))
+        pdfmetrics.registerFont(TTFont(name, str(path), subfontIndex=index))
     except Exception:
         try:
             pdfmetrics.registerFont(TTFont(name, str(path)))
@@ -50,17 +39,14 @@ def register(path, name: str) -> str | None:
 
 def pick_fallback(explicit: str | None, needs_cjk: bool) -> str | None:
     if explicit and explicit.lower() not in ("auto", "none"):
-        return register(explicit, "HWFBUser")
+        path, _, idx = explicit.partition("#")
+        return register(path, "HWFBUser", int(idx) if idx else 0)
     if explicit and explicit.lower() == "none":
         return None
-    names = ("HWFBZ", "HWFBL")
-    for path, name in zip((FALLBACK_CJK, FALLBACK_LATIN), names):
-        for p in path:
-            if Path(p).exists():
-                r = register(p, name)
-                if r:
-                    return r
-    return None
+    spec = fonts.find("cjk" if needs_cjk else "latin")
+    if not spec:
+        return None
+    return register(spec["path"], "HWFBZ" if needs_cjk else "HWFBL", spec["index"])
 
 
 def wrap(text: str, font: str, size: float, maxw: float, space_w: float) -> list[str]:
