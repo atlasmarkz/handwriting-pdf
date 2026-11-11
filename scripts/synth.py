@@ -530,8 +530,10 @@ class ExternalEngine(Engine):
     def __init__(self, provider: str | Path | None = None):
         self.provider = Path(provider) if provider else None
         if self.provider is not None and self.provider.exists():
-            # different scripts must not share a raster cache
-            digest = hashlib.sha256(self.provider.read_bytes()).hexdigest()[:8]
+            # different scripts must not share a raster cache — and neither must the same
+            # script run with different HWPDF_* knobs, which is how providers are tuned
+            env = "|".join(f"{k}={v}" for k, v in sorted(os.environ.items()) if k.startswith("HWPDF_"))
+            digest = hashlib.sha256(self.provider.read_bytes() + env.encode()).hexdigest()[:8]
             self.version = int(digest, 16)
 
     def missing(self) -> list[str]:

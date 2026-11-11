@@ -102,6 +102,7 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 | `hwpdf synth extend --font hw/synth.ttf --chars "龘"` | 往已有字库补字：只生成新字，其余从缓存重建（约 2 s，不再整库重跑） |
 | `hwpdf render --profile me --grow` | 排版时遇到缺字就地补进 profile 的 synth 字体 |
 | `hwpdf synth bench --style hw/font.ttf` | 量一个字形要多久：引擎 vs 矢量化，并外推到 1000 / 3755 字（CPU 预算） |
+| `python scripts/train_learned.py --real hw/font.ttf -o build/style.pt` | 用自己的字现训一个 192k 参数的小模型（纯 CPU，约 2 分钟），再用 `--engine external` 接回管线 |
 | `hwpdf synth eval --font hw/synth.ttf --real hw/font.ttf -o report.md` | 出评测报告：覆盖率、质量门、原样复用 IoU、倾角/笔宽是否真的印上去了 |
 
 开发/回归：

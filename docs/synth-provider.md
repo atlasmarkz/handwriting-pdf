@@ -60,6 +60,12 @@ hwpdf synth build --engine external --provider my_model_provider.py \
 `--style` 会原样传给 `generate(style, ...)`；模型不需要样例时可以省略。
 provider 文件的内容参与缓存 key——改了适配器，缓存自动失效。
 
+## 现成的例子
+
+- `examples/provider_writer.py`：一个确定性的合成写手（倾斜 + 加粗），用来做可复现的对照实验。
+- `examples/provider_learned.py`：读取 `scripts/train_learned.py` 训出来的每用户小模型（纯 CPU、无第三方权重）。
+  见 `docs/poc/learned.md` 的实验与结论。
+
 ## 边界
 
 - hwpdf 不负责模型权重、依赖安装、许可证与显存；这些留在你的环境里（见 `PLAN.md` §8 S4）。

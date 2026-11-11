@@ -27,7 +27,7 @@ import imaging  # noqa: E402
 import fonts as fonts_mod  # noqa: E402
 import fontbuild  # noqa: E402
 import pdfin  # noqa: E402
-import profile as profile_mod  # noqa: E402
+import hwprofile as profile_mod  # noqa: E402
 import render as render_mod  # noqa: E402
 import scan as scan_mod  # noqa: E402
 import templategen  # noqa: E402
