@@ -82,6 +82,14 @@ def cmd_doctor(args) -> int:
         else:
             ok = False
             print(f"{label:11s} NONE FOUND")
+    try:
+        import synth
+
+        ready = [n for n, cls in synth.ENGINES.items() if cls().ready() and cls.kind == "model"]
+        hint = "ready: " + ", ".join(ready) if ready else "no model engine (optional)"
+        print(f"synth       {hint}  ·  hwpdf synth doctor")
+    except Exception as exc:
+        print(f"synth       unavailable ({exc})")
     print("status      " + ("ok" if ok else "INCOMPLETE - pip install -r requirements.txt"))
     return 0 if ok else 1
 
@@ -646,7 +654,17 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--messy", action="store_true", help="simulate a hand-held photo")
     st.add_argument("--seed", type=int, default=5)
     st.set_defaults(func=cmd_selftest)
+
+    sy = sub.add_parser("synth", help="optional glyph synthesis (doctor / build); see PLAN.md §8")
+    sy.add_argument("synth_args", nargs=argparse.REMAINDER)
+    sy.set_defaults(func=cmd_synth)
     return p
+
+
+def cmd_synth(args) -> int:
+    import synth
+
+    return synth.main(args.synth_args)
 
 
 def main(argv=None) -> int:

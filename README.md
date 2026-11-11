@@ -79,10 +79,19 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 | `hwpdf profile save --name me --font f` | 固化字迹 profile，附 `PROMPT.md` |
 | `hwpdf preview --pdf out.pdf -d dir` | PDF 转 PNG，便于目检 |
 
+可选第二引擎（实验，尚未接入真模型）：
+
+| 命令 | 作用 |
+|---|---|
+| `hwpdf synth doctor` | 检查 synth 引擎、模型权重、缓存目录；未就绪时返回非零并给出安装指引 |
+| `hwpdf synth build --style 字迹图.png --charset ascii -o hw/font.ttf` | 推断未写过的字形 → 复用矢量化 → TTF（`--charset` 支持 `ascii`/`digits`/`alpha`/`cjk`/`common3500`/`@文件`/字面字符串） |
+| `hwpdf synth charsets` | 列出内置字表 |
+
 ## 限制
 
 - **一字一形**：没有连笔衔接、同字异形、笔压与墨色浓淡；行距/基线抖动是模拟的。
 - **字库只覆盖你写过的字**：中文正文按去重字数逐字写，每页 30 格；缺字用系统楷体兜底并告警。
+  `hwpdf synth` 是实验性的第二引擎，当前只带 `stub` 夹具（确定性抖动，**不是**风格迁移），用于打通管线与测试。
 - 生成的 PDF 文字层可搜索/复制（嵌入的是真字体）。
 - 仅供本人字迹的个人文稿使用；不用于签名、合同、票据、证件。
 

@@ -1,0 +1,10 @@
+# Optional engine for `hwpdf synth` — NOT needed for the default v0.1 path.
+# Install only if you want to synthesize glyphs you never wrote:
+#     pip install -r requirements-synth.txt
+# CPU wheels are fine; an Apple-silicon or CUDA GPU is much faster (see PLAN.md §4).
+torch>=2.2
+torchvision>=0.17
+numpy>=1.24
+pillow>=9.5
+opencv-python-headless>=4.8
+fonttools>=4.40
