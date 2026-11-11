@@ -24,7 +24,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import imaging  # noqa: E402
-import fonts as fonts_mod  # noqa: E402
+import fonts as fonts_mod
+import habits as habits_mod
+import styles as styles_mod  # noqa: E402
 import fontbuild  # noqa: E402
 import pdfin  # noqa: E402
 import hwprofile as profile_mod  # noqa: E402
@@ -335,8 +337,14 @@ def cmd_render(args) -> int:
         prof = profile_mod.load(args.profile)
     defaults = (prof or {}).get("defaults", {})
     font_path = args.font or (prof or {}).get("font_file")
+    if getattr(args, "font_name", None):
+        spec = styles_mod.resolve(args.font_name)
+        if not spec:
+            die(f"no font named {args.font_name!r}; try `hwpdf fonts`")
+        font_path = spec["path"]
+        info(f"using font: {spec.get('name') or Path(spec['path']).name} ({spec['path']})")
     if not font_path:
-        die("need --font <path> or --profile <name>")
+        die("need --font, --font-name or --profile")
     if font_path.lower().startswith("system"):
         want_latin = "latin" in font_path.lower()
         spec = fonts_mod.find("latin" if want_latin else "cjk")
@@ -348,7 +356,18 @@ def cmd_render(args) -> int:
         die(f"font not found: {font_path}")
     size = args.size if args.size is not None else defaults.get("size", 12.0)
     leading = args.leading if args.leading is not None else defaults.get("leading", 1.8)
-    jitter = args.jitter if args.jitter is not None else defaults.get("jitter", 1.0)
+    habit_note = ""
+    habit_jitter = (prof or {}).get("habits", {}).get("jitter")
+    if habit_jitter is None and args.jitter is None and not args.profile:
+        # no profile yet: measure the font itself so a premade face keeps its own rhythm
+        try:
+            habit_jitter = habits_mod.measure(font_path, limit=16)["jitter"]
+            habit_note = f"jitter {habit_jitter} measured from {Path(font_path).name}"
+        except SystemExit:
+            habit_jitter = None
+    if habit_note:
+        info(habit_note)
+    jitter = args.jitter if args.jitter is not None else defaults.get("jitter", habit_jitter if habit_jitter is not None else 1.0)
     paper = args.paper or defaults.get("paper", "ruled")
     ink = _parse_ink(args.ink if args.ink is not None else defaults.get("ink", "#1a1c24"))
     fallback = args.fallback if args.fallback is not None else defaults.get("fallback", "auto")
@@ -439,8 +458,15 @@ def cmd_profile(args) -> int:
             print(f"{'':20s} {r['font_file']}")
         return 0
     if args.action == "save":
+        style_note = None
+        if getattr(args, "font_name", None):
+            spec = styles_mod.resolve(args.font_name)
+            if not spec:
+                die(f"no font named {args.font_name!r}; try `hwpdf fonts`")
+            args.font = spec["path"]
+            style_note = {"kind": "font", "name": spec.get("name") or Path(spec["path"]).stem, "path": spec["path"]}
         if not args.name or not args.font:
-            die("profile save needs --name and --font")
+            die("profile save needs --name and one of --font / --font-name")
         synth_meta = None
         if args.synth_font:
             side = Path(str(args.synth_font) + ".json")
@@ -452,14 +478,26 @@ def cmd_profile(args) -> int:
                     synth_meta = None
             if args.engine:
                 synth_meta = {**(synth_meta or {}), "engine": args.engine}
+        habit = None
+        try:
+            habit = habits_mod.measure(args.font, limit=16)
+        except SystemExit:
+            habit = None
+        if habit:
+            info(f"habits: {habits_mod.describe(habit)}")
+        defaults = {"size": args.size, "leading": args.leading, "jitter": args.jitter, "paper": args.paper, "ink": args.ink}
+        if args.jitter is None and habit:
+            defaults["jitter"] = habit["jitter"]
         prof = profile_mod.save(
             args.name,
             args.font,
             source=args.source or "",
             notes=args.notes or "",
-            defaults={"size": args.size, "leading": args.leading, "jitter": args.jitter, "paper": args.paper, "ink": args.ink},
+            defaults=defaults,
             synth_font=args.synth_font,
             synth_meta=synth_meta,
+            style=style_note,
+            habits=habit,
         )
         print(f"\nprompt written to: {Path(prof['font_file']).parent / 'PROMPT.md'}")
         return 0
@@ -635,6 +673,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     r = sub.add_parser("render", help="render text to PDF")
     r.add_argument("--font", help=".ttf/.otf path, or system:cjk / system:latin")
+    r.add_argument("--font-name", help="a ready-made font by name (see `hwpdf fonts`), e.g. 志莽行书")
     r.add_argument("--profile", help="saved handwriting profile name (font + defaults)")
     r.add_argument("--text")
     r.add_argument("--text-file")
@@ -675,6 +714,7 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("action", choices=["save", "list", "show", "remove"])
     pf.add_argument("--name")
     pf.add_argument("--font")
+    pf.add_argument("--font-name", help="use a ready-made font instead of --font")
     pf.add_argument("--source")
     pf.add_argument("--notes")
     pf.add_argument("--synth-font", help="font of synthesized glyphs, used for characters the user never wrote")
@@ -703,10 +743,26 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--seed", type=int, default=5)
     st.set_defaults(func=cmd_selftest)
 
+    fn = sub.add_parser("fonts", help="list or download ready-made fonts (OFL)")
+    fn.add_argument("font_args", nargs=argparse.REMAINDER)
+    fn.set_defaults(func=cmd_fonts)
+
+    hb = sub.add_parser("habits", help="measure a writer's habits (slant, weight, jitter)")
+    hb.add_argument("habit_args", nargs=argparse.REMAINDER)
+    hb.set_defaults(func=cmd_habits)
+
     sy = sub.add_parser("synth", help="optional glyph synthesis (doctor / build); see PLAN.md §8")
     sy.add_argument("synth_args", nargs=argparse.REMAINDER)
     sy.set_defaults(func=cmd_synth)
     return p
+
+
+def cmd_fonts(args) -> int:
+    return styles_mod.main(args.font_args)
+
+
+def cmd_habits(args) -> int:
+    return habits_mod.main(args.habit_args)
 
 
 def cmd_synth(args) -> int:
@@ -721,6 +777,12 @@ def main(argv=None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # `fonts` / `habits` take their own flags; argparse's REMAINDER only swallows them when a
+    # positional comes first, so hand the tail over directly.
+    if argv and argv[0] in ("fonts", "habits"):
+        tail = argv[1:]
+        return styles_mod.main(tail) if argv[0] == "fonts" else habits_mod.main(tail)
     args = build_parser().parse_args(argv)
     return args.func(args)
 

@@ -41,6 +41,27 @@ hwpdf render --font hw/font.ttf --text-file letter.txt -o hw/letter.pdf
 
 打印要点：**A4 / 100%（实际大小）**，深色笔（0.5 mm+），每格一个字，照片里四角黑块要完整。
 
+## 两种风格来源：预制字体，或你自己的样本
+
+<p align="center"><img src="docs/poc/style-paths.png" width="720" alt="预制字体与用户样本两条路径的对照"></p>
+
+| 来源 | 怎么用 | 适合 |
+|---|---|---|
+| **预制字体** | `hwpdf fonts` 列出目录，`hwpdf fonts --fetch zhimangxing` 下载（OFL-1.1，可商用可嵌入），`hwpdf render --font-name 志莽行书` | 想要好看的字，不想写样本 |
+| **你的样本** | 练习纸 → `hwpdf scan` → `hwpdf font` → `hwpdf profile save`；缺字由 `synth` 按你的样本补 | 想让它**像你写的** |
+
+两条路共用一套渲染与版面。样本那条路还做不到"以假乱真"：合成字的笔画粗细与字面大小仍会和真实字有可见差异（上图第二行：写过的"永和九年岁在癸丑"是原笔迹，其余是合成的）。样本那条路会先量你的**书写习惯**——倾角、笔重、字宽、行距抖动——再据此排版；预制字体那条路同样会量一遍，让整页保持字体自带的节奏：
+
+```bash
+hwpdf fonts                                # 目录 + 已下载的字体
+hwpdf fonts --fetch zhimangxing            # 下载并校验，许可写进 LICENSES.txt
+hwpdf habits --font-name 志莽行书           # 量一遍：倾斜 / 字宽 / 抖动建议
+hwpdf profile save --name 我的字 --font-name 志莽行书   # 存成 profile，抖动自动取测量值
+hwpdf render --profile 我的字 --text-file doc.txt -o out.pdf
+```
+
+`--jitter` 不给时会用测量值：排版体（黑体/宋体）约 0.35，真实行书约 1.5–2.0。字体只在本地，下载要显式触发，不联网也能用系统字体。
+
 ## 只写了几个字，也能排整页（可选）
 
 `synth` 用你写过的字估计倾斜、笔宽与比例，再印到系统骨架上——没写过的字也能按你的样子排出来。纯 CPU、不下载、不联网。

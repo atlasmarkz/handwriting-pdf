@@ -60,6 +60,8 @@ def save(
     defaults: dict | None = None,
     synth_font=None,
     synth_meta: dict | None = None,
+    style: dict | None = None,
+    habits: dict | None = None,
 ) -> dict:
     font_path = Path(font_path)
     if not font_path.exists():
@@ -101,6 +103,10 @@ def save(
             "glyphs": _font_meta(dest_synth)["glyphs"],
             **(synth_meta or {}),
         }
+    if style:
+        prof["style"] = style
+    if habits:
+        prof["habits"] = {k: habits[k] for k in ("slant", "weight", "tilt_deg", "size_cv", "wobble_em", "fill", "jitter", "tracking", "chars") if k in habits}
     if defaults:
         prof["defaults"].update({k: v for k, v in defaults.items() if v is not None})
     save_json(d / "profile.json", prof)
@@ -135,6 +141,14 @@ def listing() -> list[dict]:
     return out
 
 
+def habits_row(prof: dict) -> str:
+    h = prof.get("habits") or {}
+    if not h:
+        return "-"
+    return (f"倾角 {h.get('slant', 0):+.2f}、笔重 {h.get('weight', 0):+d}、"
+            f"抖动 {h.get('jitter', 0):.2f}、字宽占比 {h.get('fill', 0):.2f}")
+
+
 def _prompt(prof: dict) -> str:
     d = prof["defaults"]
     synth_note = (
@@ -164,6 +178,8 @@ def _prompt(prof: dict) -> str:
 | 字形数 | {prof['glyphs']} |
 | 可用字符 | {prof['char_count']} |
 | 来源 | {prof['source'] or '-'} |
+| 风格来源 | {((prof.get('style') or {}).get('kind') == 'font' and '预制字体 ' + (prof.get('style') or {}).get('name', '')) or '我的手写样本'} |
+| 书写习惯 | {habits_row(prof)} |
 | synth 字体 | {(prof.get('synth') or {}).get('engine', '-') if prof.get('synth') else '无（只用写过的字）'} |
 | 创建时间 | {prof['created']} |
 | SHA-256 | `{prof['font_sha256'][:16]}…` |
