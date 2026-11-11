@@ -427,6 +427,13 @@ def fit_style(style_font: Path, size: int, script: str = "latin") -> dict:
     cmap = glyphs_of(style_font)
     seeds = [c for c in (FIT_CJK if script == "cjk" else FIT_LATIN) if ord(c) in cmap][:8]
     if not seeds:
+        # A writer who only wrote 50 arbitrary characters may have none of the canonical
+        # seeds. Any glyphs of the script will do for measuring slant and weight.
+        pool = [chr(c) for c in sorted(cmap) if chr(c).isprintable()]
+        if script == "cjk":
+            pool = [c for c in pool if util.is_cjk(c)] or pool
+        seeds = pool[:8]
+    if not seeds:
         return dict(NEUTRAL, seeds="", skeleton=None, skeleton_index=0, baseline=SF_BASELINE)
 
     try:
