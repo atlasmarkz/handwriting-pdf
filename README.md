@@ -1,4 +1,4 @@
-<h1 align="center"><img src="docs/logo-mark.png" width="38" align="bottom" hspace="12"> handwriting-pdf</h1>
+<h1 align="center"><img src="docs/logo-mark.png" width="32" align="bottom" hspace="10"> handwriting-pdf</h1>
 
 <p align="center">
   <b>把照片里的字迹，变成一份能打印的手写稿</b><br>
@@ -85,15 +85,6 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 - **字库只覆盖你写过的字**：中文正文按去重字数逐字写，每页 30 格；缺字用系统楷体兜底并告警。
 - 生成的 PDF 文字层可搜索/复制（嵌入的是真字体）。
 - 仅供本人字迹的个人文稿使用；不用于签名、合同、票据、证件。
-
-## 贡献者
-
-| 角色 | 贡献者 |
-|---|---|
-| 需求、字迹样本、验收 | [atlasmarkz](https://github.com/atlasmarkz) |
-| 调研、设计、实现、测试、文档 | DeepSeek AI（deepseek-v4.1-flash） |
-
-详见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。agent 起草并验证，仓库所有者复核后发布。
 
 ## License
 
