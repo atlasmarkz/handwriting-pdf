@@ -70,8 +70,12 @@ hwpdf render --profile 我的字 --text-file doc.txt -o out.pdf
 
 <p align="center"><img src="docs/poc/stylefit-page.png" width="680" alt="7 个手写字母 + 合成字排出的中英混排页面"></p>
 
+<p align="center"><img src="docs/poc/mixed-line.png" width="720" alt="一行里前半是原笔迹、后半是合成字"></p>
+
 - 一条命令：`hwpdf synth build --style 你的字.ttf --charset cjk -o synth.ttf`（3755 字约 10 秒）
-- 它**不是**风格迁移：字形结构来自系统无衬线骨架，只带上你的倾角与笔宽；有真模型的话用 `--engine external --provider` 接进来
+- 它**不是**风格迁移：字形结构来自系统无衬线骨架，只带上你的倾角、笔宽与比例；有真模型的话用 `--engine external --provider` 接进来
+- 笔迹粗细可以覆盖：`synth build --weight -1…2`（默认用样本量出来的值）
+- 上面那行里"永和九年，岁在癸丑"是原笔迹、"暮春之初，会于会稽"是合成——**接缝看得出来**：中文骨架是黑体，而 macOS 上没有中文手写骨架
 - 细节、实测数字与已知限制：[docs/poc/stylefit.md](docs/poc/stylefit.md)
 
 ## 三种输入，按可靠性排序
@@ -117,7 +121,7 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 | 命令 | 作用 |
 |---|---|
 | `hwpdf synth doctor` | 检查 synth 引擎、模型权重、缓存目录；未就绪时返回非零并给出安装指引 |
-| `hwpdf synth build --style 字迹图.png --charset ascii -o hw/font.ttf` | 推断未写过的字形 → 复用矢量化 → TTF（`--charset` 支持 `ascii`/`digits`/`alpha`/`cjk`/`common3500`/`@文件`/字面字符串） |
+| `hwpdf synth build --style 字迹图.png --charset ascii [--weight N] -o hw/font.ttf` | 推断未写过的字形 → 复用矢量化 → TTF（`--charset` 支持 `ascii`/`digits`/`alpha`/`cjk`/`common3500`/`@文件`/字面字符串） |
 | `hwpdf synth charsets` | 列出内置字表 |
 | `hwpdf synth specimen --font hw/font.ttf --real hw/font-real.ttf -o sheet.png` | 生成字形对照表（左：你写的；右：推断的），跑模型前先目检 |
 | `hwpdf synth verify --font hw/font.ttf [--charset cjk]` | 报告字体覆盖率：哪些字还得靠回退字体 |

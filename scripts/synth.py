@@ -603,6 +603,10 @@ class StyleFitEngine(Engine):
         if script in self._params:
             return self._params[script]
         p = fit_style(style_font, size, script)
+        override = getattr(self, "weight_override", None)
+        if override is not None and p.get("fitted") and p["weight"] != override:
+            info(f"stylefit[{script}]: weight {p['weight']:+d} -> {override:+d} (--weight)")
+            p = {**p, "weight": int(override)}
         if p.get("fitted"):
             info(f"stylefit[{script}]: slant={p['slant']} weight={p['weight']} "
                  f"yscale={p['yscale']} xscale={p['xscale']} seeds={p['seeds']!r}")
@@ -741,11 +745,14 @@ def build(
     tracking: float = 0.07,
     cache: bool = True,
     retries: int = 1,
+    weight: int | None = None,
     with_punct: bool = True,
     limit: int = 0,
     style_required: bool = True,
 ) -> dict:
     eng = get_engine(engine, style, provider)
+    if weight is not None:
+        eng.weight_override = weight
     if style is None and style_required and (engine or "") not in ("stub", "external"):
         # Only an explicitly named fixture engine may run without a sample; a silent
         # fallback to stub output would look like a real synthesis result.
@@ -764,7 +771,7 @@ def build(
         die(f"engine {eng.name} is not ready ({rows}); run `hwpdf synth doctor`", 3)
 
     t0 = time.time()
-    key = _cache_key(eng, style, size, seed)
+    key = _cache_key(eng, style, size, seed) + (f"|w{weight}" if weight is not None else "")
     cache_dir = util.ensure_dir(Path(cache_root()) / "synth" / key) if cache else None
     generated: dict[str, dict] = {}
     hits = 0
@@ -1081,6 +1088,7 @@ def cmd_synth(args) -> int:
             tracking=args.tracking,
             cache=not args.no_cache,
             retries=args.retries,
+            weight=args.weight,
             with_punct=not args.no_punct,
             limit=args.limit,
         )
@@ -1240,6 +1248,8 @@ def main(argv=None) -> int:
     b.add_argument("--smooth", type=int, default=1, choices=(0, 1))
     b.add_argument("--tracking", type=float, default=0.07)
     b.add_argument("--retries", type=int, default=1, help="re-sample a glyph that fails the gate N extra times")
+    b.add_argument("--weight", type=int, choices=[-2, -1, 0, 1, 2],
+                   help="override the fitted stroke weight (stylefit)")
     b.add_argument("--no-cache", action="store_true")
     b.add_argument("--no-punct", action="store_true", help="do not add CJK punctuation for CJK charsets")
     b.add_argument("--limit", type=int, default=0, help="only the first N characters (smoke tests)")

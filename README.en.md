@@ -70,7 +70,11 @@ With no `--jitter` the measured value is used: a typeset face (Hei/Song) lands a
 
 <p align="center"><img src="docs/poc/stylefit-page.png" width="680" alt="A mixed Chinese/English page set with 7 handwritten letters plus synthesised glyphs"></p>
 
+<p align="center"><img src="docs/poc/mixed-line.png" width="720" alt="one line: the first half is the original hand, the second half is synthesised"></p>
+
 - One command: `hwpdf synth build --style your-hand.ttf --charset cjk -o synth.ttf` (3755 characters in about 10 s)
+- Stroke weight can be overridden: `synth build --weight -1…2` (the default is measured from your sample)
+- In the line above, 永和九年，岁在癸丑 is the original hand and 暮春之初，会于会稽 is synthesised — **the seam is visible**: the CJK skeleton is a sans face, and macOS ships no handwritten CJK skeleton
 - It is **not** style transfer: structure comes from a system sans-serif skeleton, only your slant and stroke weight are carried over; plug in a real model through `--engine external --provider`
 - Details, measured numbers and known limits: [docs/poc/stylefit.md](docs/poc/stylefit.md)
 
@@ -117,7 +121,7 @@ Optional second engine (experimental, no real model wired in yet):
 | Command | What it does |
 |---|---|
 | `hwpdf synth doctor` | check the synth engines, model weights, cache directory; exits non-zero with install hints when nothing is ready |
-| `hwpdf synth build --style hand.png --charset ascii -o hw/font.ttf` | infer unwritten glyphs → reuse vectorisation → TTF (`--charset` accepts `ascii`/`digits`/`alpha`/`cjk`/`common3500`/`@file`/a literal string) |
+| `hwpdf synth build --style hand.png --charset ascii [--weight N] -o hw/font.ttf` | infer unwritten glyphs → reuse vectorisation → TTF (`--charset` accepts `ascii`/`digits`/`alpha`/`cjk`/`common3500`/`@file`/a literal string) |
 | `hwpdf synth charsets` | list the built-in character sets |
 | `hwpdf synth specimen --font hw/font.ttf --real hw/font-real.ttf -o sheet.png` | side-by-side sheet (left: yours; right: inferred) to eyeball before running a model |
 | `hwpdf synth verify --font hw/font.ttf [--charset cjk]` | report coverage: which characters still need the fallback |
