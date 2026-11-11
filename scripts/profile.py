@@ -12,9 +12,19 @@ from util import die, ensure_dir, info, load_json, save_json, warn
 
 
 def profiles_dir() -> Path:
+    """HWPDF_PROFILE_DIR > HWPDF_HOME/profiles > ~/.handwriting-pdf/profiles."""
     env = os.environ.get("HWPDF_PROFILE_DIR")
-    base = Path(env) if env else Path.home() / ".handwriting-pdf" / "profiles"
-    return ensure_dir(base)
+    home = os.environ.get("HWPDF_HOME")
+    if env:
+        base = Path(env)
+    elif home:
+        base = Path(home) / "profiles"
+    else:
+        base = Path.home() / ".handwriting-pdf" / "profiles"
+    try:
+        return ensure_dir(base)
+    except OSError as exc:
+        die(f"cannot create the profile directory {base}: {exc}; set HWPDF_PROFILE_DIR to a writable path")
 
 
 def _sha256(path) -> str:
@@ -42,7 +52,15 @@ def _font_meta(font_path) -> dict:
     return {"family": family, "glyphs": len(f.getGlyphOrder()), "chars": chars}
 
 
-def save(name: str, font_path, source: str = "", notes: str = "", defaults: dict | None = None) -> dict:
+def save(
+    name: str,
+    font_path,
+    source: str = "",
+    notes: str = "",
+    defaults: dict | None = None,
+    synth_font=None,
+    synth_meta: dict | None = None,
+) -> dict:
     font_path = Path(font_path)
     if not font_path.exists():
         die(f"font not found: {font_path}")
@@ -71,6 +89,18 @@ def save(name: str, font_path, source: str = "", notes: str = "", defaults: dict
             "fallback": "auto",
         },
     }
+    if synth_font:
+        synth_font = Path(synth_font)
+        if not synth_font.exists():
+            die(f"synth font not found: {synth_font}")
+        dest_synth = d / "synth.ttf"
+        shutil.copyfile(synth_font, dest_synth)
+        prof["synth"] = {
+            "font_file": str(dest_synth),
+            "font_sha256": _sha256(dest_synth),
+            "glyphs": _font_meta(dest_synth)["glyphs"],
+            **(synth_meta or {}),
+        }
     if defaults:
         prof["defaults"].update({k: v for k, v in defaults.items() if v is not None})
     save_json(d / "profile.json", prof)
@@ -107,6 +137,11 @@ def listing() -> list[dict]:
 
 def _prompt(prof: dict) -> str:
     d = prof["defaults"]
+    synth_note = (
+        f"用 synth 字体 `{prof['synth']['font_file']}`（{prof['synth'].get('engine', '?')}）补字"
+        if prof.get("synth")
+        else "退回系统楷体"
+    )
     return f"""# 手写字体 profile：{prof['name']}
 
 把这段提示词粘给任意 agent（Codex / DeepSeek Harness / Claude Code 等），它就能稳定地用这套字迹出稿。
@@ -118,7 +153,7 @@ def _prompt(prof: dict) -> str:
 > - 工具：`hwpdf`（handwriting-pdf skill；Windows 用 `<skill>\\bin\\hwpdf.cmd`，其他系统用 `<skill>/bin/hwpdf`）
 > - 命令：`hwpdf render --profile {prof['name']} --text-file doc.txt -o out.pdf`
 > - 默认版式：A4、{d['paper']}、{d['size']}pt、行距 {d['leading']}、抖动 {d['jitter']}、墨色 {d['ink']}
-> - 缺字会退回系统楷体并在 stderr 告警；若要补字，用 `hwpdf template --chars "<缺的字>"` 再 `scan --append`。
+> - 缺字会{synth_note}并在 stderr 告警；若要补字，用 `hwpdf template --chars "<缺的字>"` 再 `scan --append`。
 > - 仅用于本人字迹与个人文稿，不用于签名/合同/票据/证件。
 
 ## 字体信息
@@ -129,6 +164,7 @@ def _prompt(prof: dict) -> str:
 | 字形数 | {prof['glyphs']} |
 | 可用字符 | {prof['char_count']} |
 | 来源 | {prof['source'] or '-'} |
+| synth 字体 | {(prof.get('synth') or {}).get('engine', '-') if prof.get('synth') else '无（只用写过的字）'} |
 | 创建时间 | {prof['created']} |
 | SHA-256 | `{prof['font_sha256'][:16]}…` |
 

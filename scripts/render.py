@@ -49,7 +49,19 @@ def pick_fallback(explicit: str | None, needs_cjk: bool) -> str | None:
     return register(spec["path"], "HWFBZ" if needs_cjk else "HWFBL", spec["index"])
 
 
-def wrap(text: str, font: str, size: float, maxw: float, space_w: float) -> list[str]:
+def wrap(text: str, font: str, size: float, maxw: float, space_w: float,
+         cmap: set[int] | None = None, fb: str | None = None) -> list[str]:
+    """Greedy wrap that measures each character with the font it will actually be drawn in."""
+    def adv(ch: str) -> float:
+        if ch == " ":
+            return space_w
+        if fb and cmap is not None and ord(ch) not in cmap:
+            return pdfmetrics.stringWidth(ch, fb, size)
+        return pdfmetrics.stringWidth(ch, font, size)
+
+    def width(line: str) -> float:
+        return sum(adv(c) for c in line)
+
     lines: list[str] = []
     for para in text.replace("\r\n", "\n").split("\n"):
         if not para.strip():
@@ -57,9 +69,8 @@ def wrap(text: str, font: str, size: float, maxw: float, space_w: float) -> list
             continue
         cur = ""
         for ch in para:
-            trial = cur + ch
-            if pdfmetrics.stringWidth(trial, font, size) <= maxw:
-                cur = trial
+            if width(cur + ch) <= maxw:
+                cur += ch
                 continue
             if ch == " ":
                 lines.append(cur)
@@ -78,6 +89,7 @@ def wrap(text: str, font: str, size: float, maxw: float, space_w: float) -> list
                 cur = ch
         lines.append(cur)
     return lines
+
 
 
 def render(
@@ -103,11 +115,20 @@ def render(
     cmap = cmap_of(font_path)
     needs_cjk = any(ord(ch) > 0x2E7F and ch not in "\u00a0" for ch in text)
     fb = pick_fallback(fallback, needs_cjk)
+    fb_cmap: set[int] | None = None
+    if fallback and fallback.lower() not in ("auto", "none"):
+        fb_path, _, fb_idx = fallback.partition("#")
+        try:
+            fb_cmap = cmap_of(fb_path) if not fb_idx else set(
+                FTFont(fb_path, fontNumber=int(fb_idx)).getBestCmap()
+            )
+        except Exception:
+            fb_cmap = None
 
     space_w = pdfmetrics.stringWidth(" ", body, size)
     if space_w <= 0.1:
         space_w = size * 0.32
-    lines = wrap(text, body, size, maxw, space_w)
+    lines = wrap(text, body, size, maxw, space_w, cmap, fb)
     line_h = size * leading
     ink_rgb = tuple(ink)
 
@@ -180,4 +201,10 @@ def render(
     c.save()
     if missing:
         warn(f"{len(missing)} character(s) missing from the font, drawn with fallback: {''.join(sorted(missing))[:120]}")
-    return {"path": str(out_path), "pages": page, "missing": sorted(missing), "lines": len(lines)}
+    blank: list[str] = []
+    if missing and fb_cmap is not None:
+        blank = sorted(ch for ch in missing if ord(ch) not in fb_cmap)
+        if blank:
+            warn(f"{len(blank)} character(s) are missing from the fallback too and will render blank: "
+                 f"{''.join(blank)[:120]} — rebuild it with a charset that covers them")
+    return {"path": str(out_path), "pages": page, "missing": sorted(missing), "blank": blank, "lines": len(lines)}

@@ -133,4 +133,10 @@
 | **S5** profile/charset 集成 | 与现有工作流合体 | profile `type: synth`（记录 style hash、引擎、参数）、`--charset` 常用字预生成、缺字按需生成 | `hwpdf render` 直接吃 synth profile；同一 profile 二次渲染不触发推理 |
 | **S6** 评测与文档 | 可发布、可复现 | 自动指标脚本（SSIM/缺字率/12pt 可读性）、SKILL.md 增补、许可与隐私说明 | 指标脚本一条命令出报告；文档明确"默认本地、权重不入库" |
 
-当前状态：S0–S2 完成；S3（质量门加固）进行中。
+当前状态：S0–S3 完成，S5 主体完成；S4 等两件用户决策（用哪个模型/权重许可 + 有无独显），期间用 `stylefit` 解析式基线顶上。
+
+**S3 落地细节**：质量门（`GATE`：墨量 1.2%–62%、包围盒 ≥28% 边长、贴边即裁切）+ 失败自动重采样（`--retries`，默认 1，换 seed 重画）；`meta.gate` 记录 passed/rejected/retried/attempts 与阈值；缓存 key = `engine.name.version|size|seed|SCHEMA_VERSION`，引擎 `version` 一改就自动失效；`hwpdf synth verify --font` 报覆盖率；`--no-cache` 用于基准测试。
+
+**S5 落地细节**：`hwpdf profile save --synth-font <ttf>` 把 synth 字体复制进 profile 并记录 engine/style_sha256/gate；之后 `hwpdf render --profile <名字>` 对"没写过的字"自动用 synth 字体（显式 `--fallback` 优先）；profile 目录可用 `HWPDF_PROFILE_DIR` / `HWPDF_HOME` 改位置。
+
+**S4 之前的 `stylefit` 基线（已可用）**：不训练、不下载、纯 CPU——从你写过的字里量出倾角（列投影方差扫描）、笔宽、x 高/字宽比例，再用仿射+形态学把这些参数印到系统骨架字（中文宋体 / 拉丁 Bradley Hand）上；你写过的字直接原样复用。中文无样本时借用拉丁的倾角与笔宽。它是 S4 的对照基线（`--engine stylefit`，`doctor` 里显示 ready），不是风格迁移：笔画粗细变化、连笔、结构变形都不会被学会。

@@ -85,8 +85,14 @@ def cmd_doctor(args) -> int:
     try:
         import synth
 
-        ready = [n for n, cls in synth.ENGINES.items() if cls().ready() and cls.kind == "model"]
-        hint = "ready: " + ", ".join(ready) if ready else "no model engine (optional)"
+        usable = [n for n, cls in synth.ENGINES.items() if cls().ready() and cls.kind != "fixture"]
+        models = [n for n in usable if synth.ENGINES[n].kind == "model"]
+        if models:
+            hint = "ready: " + ", ".join(models)
+        elif usable:
+            hint = f"ready: {', '.join(usable)} (baseline, no model)"
+        else:
+            hint = "no engine ready (optional)"
         print(f"synth       {hint}  ·  hwpdf synth doctor")
     except Exception as exc:
         print(f"synth       unavailable ({exc})")
@@ -328,6 +334,11 @@ def cmd_render(args) -> int:
     paper = args.paper or defaults.get("paper", "ruled")
     ink = _parse_ink(args.ink if args.ink is not None else defaults.get("ink", "#1a1c24"))
     fallback = args.fallback if args.fallback is not None else defaults.get("fallback", "auto")
+    synth = (prof or {}).get("synth")
+    if args.fallback is None and synth and str(fallback).lower() == "auto":
+        # the profile carries a synthesized font: use it for the characters you never wrote
+        fallback = synth["font_file"]
+        info(f"synth fallback: {synth.get('engine', '?')} -> {fallback}")
     res = render_mod.render(
         text,
         font_path,
@@ -410,12 +421,25 @@ def cmd_profile(args) -> int:
     if args.action == "save":
         if not args.name or not args.font:
             die("profile save needs --name and --font")
+        synth_meta = None
+        if args.synth_font:
+            side = Path(str(args.synth_font) + ".json")
+            if side.exists():
+                try:
+                    meta = load_json(side)
+                    synth_meta = {k: meta.get(k) for k in ("engine", "engine_kind", "style_sha256", "charset", "built", "rejected", "cache_key")}
+                except Exception:
+                    synth_meta = None
+            if args.engine:
+                synth_meta = {**(synth_meta or {}), "engine": args.engine}
         prof = profile_mod.save(
             args.name,
             args.font,
             source=args.source or "",
             notes=args.notes or "",
             defaults={"size": args.size, "leading": args.leading, "jitter": args.jitter, "paper": args.paper, "ink": args.ink},
+            synth_font=args.synth_font,
+            synth_meta=synth_meta,
         )
         print(f"\nprompt written to: {Path(prof['font_file']).parent / 'PROMPT.md'}")
         return 0
@@ -631,6 +655,8 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("--font")
     pf.add_argument("--source")
     pf.add_argument("--notes")
+    pf.add_argument("--synth-font", help="font of synthesized glyphs, used for characters the user never wrote")
+    pf.add_argument("--engine", help="record which synth engine produced --synth-font")
     pf.add_argument("--size", type=float)
     pf.add_argument("--leading", type=float)
     pf.add_argument("--jitter", type=float)

@@ -44,7 +44,7 @@ GATE = {
 # Punctuation is legitimately small and flat: judging it like a letter would reject
 # every period and comma a model produces. Only "should be tall" glyphs get the
 # ink/height floors; all glyphs still have to be non-empty, unclipped and not blobs.
-CJK_PUNCT = "，。、；：！？…—–·''“”‘’（）《》〈〉【】「」『』～"
+CJK_PUNCT = "，。、；：！？…—–·‘’“”（）《》〈〉【】「」『』～"
 SMALL_GLYPHS = set(
     "\"'`.,;:-_=~^!?*·"
     "、。，；：！？…—–''“”‘’（）《》〈〉【】「」『』·～"
@@ -77,8 +77,13 @@ def resolve_charset(spec: str | None) -> list[str]:
     if not spec:
         die("need --charset (try `hwpdf synth charsets`)")
     s = spec.strip()
-    if s.startswith("@") or s.startswith("file:"):
-        path = Path(s.split(":", 1)[1] if s.startswith("file:") else s[1:])
+    if s.startswith("@") or s.startswith("file:") or (len(s) > 1 and Path(s).is_file()):
+        if s.startswith("file:"):
+            path = Path(s.split(":", 1)[1])
+        elif s.startswith("@"):
+            path = Path(s[1:])
+        else:
+            path = Path(s)
         if not path.exists():
             die(f"charset file not found: {path}")
         chars = _read_charset_file(path)
@@ -141,7 +146,7 @@ def reference_box(ch: str, size: int) -> float:
     spec = fonts.find_for("cjk" if util.is_cjk(ch) else "latin", ch) or fonts.find("cjk" if util.is_cjk(ch) else "latin")
     if spec is not None:
         try:
-            font = ImageFont.truetype(spec["path"], int(size * 0.72), index=spec["index"])
+            font = ImageFont.truetype(spec["path"], int(size * STYLE_SCALE), index=spec["index"])
             img = Image.new("L", (size, size), 0)
             ImageDraw.Draw(img).text((size / 2, size * BASELINE), ch, fill=255, font=font, anchor="ms")
             ys, _ = np.nonzero(np.array(img) > 0)
@@ -150,6 +155,19 @@ def reference_box(ch: str, size: int) -> float:
             ratio = 0.0
     _REF_BOX[key] = ratio
     return ratio
+
+
+def verdict(mask: np.ndarray, ch: str, size: int) -> dict:
+    """Structural verdict for one glyph, with legitimately flat characters admitted."""
+    v = inspect_glyph(mask, ch)
+    if not v["ok"] and all(r.startswith("too flat") for r in v["reasons"]):
+        if reference_box(ch, size) < GATE["box_min"] * 1.5:
+            v = {**v, "ok": True, "reasons": [], "flat_ok": True}
+    return v
+
+
+def _passes(mask: np.ndarray, ch: str, size: int) -> bool:
+    return verdict(mask, ch, size)["ok"]
 
 
 def expects_tall(ch: str) -> bool:
@@ -191,6 +209,7 @@ def inspect_glyph(mask: np.ndarray, ch: str = "") -> dict:
 # ------------------------------------------------------------------ engines
 class Engine:
     name = "base"
+    version = 1          # bump when the output changes, to invalidate the raster cache
     summary = ""
     kind = "model"          # "fixture" engines are for tests, never for a real profile
     requires: tuple[str, ...] = ()
@@ -239,7 +258,7 @@ class StubEngine(Engine):
                 continue
             key = f"{spec['path']}#{spec['index']}"
             if key not in cache:
-                cache[key] = ImageFont.truetype(spec["path"], int(size * 0.72), index=spec["index"])
+                cache[key] = ImageFont.truetype(spec["path"], int(size * STYLE_SCALE), index=spec["index"])
             out[ch] = self._draw(ch, cache[key], size, seed)
             if progress:
                 progress(ch, out[ch])
@@ -293,12 +312,240 @@ class DiffFontEngine(Engine):
         die(f"engine {self.name} is not implemented yet (tracked as S4 in PLAN.md §8)", 3)
 
 
-ENGINES: dict[str, type[Engine]] = {e.name: e for e in (StubEngine, DiffFontEngine)}
+# ------------------------------------------------------------------ stylefit
+# An analytic baseline that needs no weights and no GPU: measure the measurable
+# parts of the style (slant, stroke weight, proportion, x-height) from the glyphs
+# you did write, then imprint them on a neutral skeleton font. It is not learned
+# style transfer — but it is real, deterministic, offline, and a fair comparison
+# point for the diffusion adapter.
+FIT_LATIN = "xnoaehgpds"
+FIT_CJK = "永和九年岁在癸丑上下中今"
+NEUTRAL = {"slant": 0.0, "weight": 0, "yscale": 1.0, "xscale": 1.0, "fitted": False}
+# Glyphs are cut into a size x size cell; drawing the em at 0.66 leaves room for
+# ascenders and descenders so nothing touches (and gets clipped by) the border.
+STYLE_SCALE = 0.62
+# Style glyphs sit a little higher than the stub's baseline so descenders
+# (q, g, p) still fit after the fitted y-scale stretches them.
+SF_BASELINE = 0.74
+
+_CMAP_CACHE: dict[str, set[int]] = {}
 
 
-def get_engine(name: str | None) -> Engine:
+def glyphs_of(font_path: Path) -> set[int]:
+    """Codepoints the font actually maps (a missing char would otherwise draw .notdef)."""
+    key = str(font_path)
+    if key not in _CMAP_CACHE:
+        try:
+            from fontTools.ttLib import TTFont as _FTFont
+
+            _CMAP_CACHE[key] = set(_FTFont(key).getBestCmap())
+        except Exception:
+            _CMAP_CACHE[key] = set()
+    return _CMAP_CACHE[key]
+
+
+def _draw(font: ImageFont.FreeTypeFont, ch: str, size: int, baseline: float | None = None) -> np.ndarray:
+    img = Image.new("L", (size, size), 0)
+    y = size * (BASELINE if baseline is None else baseline)
+    ImageDraw.Draw(img).text((size / 2, y), ch, fill=255, font=font, anchor="ms")
+    return np.array(img, dtype=np.uint8)
+
+
+def _shear_score(mask: np.ndarray, shear: float) -> float:
+    """Column-profile peakiness after shearing; the true slant maximizes it."""
+    import cv2
+
+    h, w = mask.shape
+    mat = np.float32([[1, shear, -shear * h / 2], [0, 1, 0]])
+    out = cv2.warpAffine(mask, mat, (w, h), flags=cv2.INTER_LINEAR, borderValue=0)
+    prof = (out > 96).sum(axis=0).astype(np.float64)
+    return float(((prof - prof.mean()) ** 2).mean())
+
+
+def _ink_and_box(mask: np.ndarray, size: int) -> tuple[float, float, float]:
+    ys, xs = np.nonzero(mask > 0)
+    if not len(ys):
+        return 0.0, 0.0, 0.0
+    return float((mask > 0).mean()), float((ys.max() - ys.min() + 1) / size), float((xs.max() - xs.min() + 1) / size)
+
+
+def fit_style(style_font: Path, size: int, script: str = "latin") -> dict:
+    """Measure slant / stroke weight / proportion on the glyphs the user wrote, for one script."""
+    cmap = glyphs_of(style_font)
+    seeds = [c for c in (FIT_CJK if script == "cjk" else FIT_LATIN) if ord(c) in cmap][:8]
+    if not seeds:
+        return dict(NEUTRAL, seeds="", skeleton=None, skeleton_index=0, baseline=SF_BASELINE)
+
+    try:
+        font = ImageFont.truetype(str(style_font), int(size * STYLE_SCALE))
+    except Exception as exc:
+        die(f"cannot read the style font {style_font} ({exc}); pass a .ttf of your real glyphs")
+
+    stack = np.zeros((size, size), np.uint8)
+    for ch in seeds:
+        stack = np.maximum(stack, _draw(font, ch, size, SF_BASELINE))
+    shear = max((float(sh) for sh in np.arange(-0.30, 0.301, 0.04)), key=lambda sh: _shear_score(stack, sh))
+    ink, hh, ww = _ink_and_box(stack, size)
+
+    skel_spec = fonts.find(script)
+    if skel_spec is None:
+        return dict(NEUTRAL, slant=round(shear, 3), seeds="".join(seeds), skeleton=None, skeleton_index=0)
+    skel_font = ImageFont.truetype(skel_spec["path"], int(size * STYLE_SCALE), index=skel_spec["index"])
+    skel_stack = np.zeros((size, size), np.uint8)
+    for ch in seeds:
+        if ord(ch) in glyphs_of(Path(skel_spec["path"])):
+            skel_stack = np.maximum(skel_stack, _draw(skel_font, ch, size, SF_BASELINE))
+    s_ink, s_h, s_w = _ink_and_box(skel_stack, size)
+    return {
+        "slant": round(shear, 3),
+        "weight": int(np.clip(round((ink / s_ink - 1) * 6), -1, 2)) if s_ink else 0,
+        "yscale": round(float(np.clip(hh / s_h, 0.85, 1.15)), 3) if s_h else 1.0,
+        "xscale": round(float(np.clip(ww / s_w, 0.85, 1.15)), 3) if s_w else 1.0,
+        "fitted": True,
+        "baseline": SF_BASELINE,
+        "seeds": "".join(seeds),
+        "skeleton": skel_spec["path"],
+        "skeleton_index": skel_spec["index"],
+    }
+
+
+def _shift_inside(img: np.ndarray, margin: int = 1) -> np.ndarray:
+    """Move ink back inside the cell instead of letting the border cut it off."""
+    import cv2
+
+    ys, xs = np.nonzero(img)
+    if not len(ys):
+        return img
+    h, w = img.shape
+    dy = dx = 0
+    if ys.max() >= h - margin:
+        dy = -int(ys.max() - (h - margin - 1))
+    elif ys.min() < margin:
+        dy = int(margin - ys.min())
+    if xs.max() >= w - margin:
+        dx = -int(xs.max() - (w - margin - 1))
+    elif xs.min() < margin:
+        dx = int(margin - xs.min())
+    if dx or dy:
+        img = cv2.warpAffine(img, np.float32([[1, 0, dx], [0, 1, dy]]), (w, h), borderValue=0)
+    return img
+
+
+def apply_style(mask: np.ndarray, params: dict, ch: str, seed: int) -> np.ndarray:
+    import cv2
+
+    h, w = mask.shape
+    rng = np.random.default_rng(int(hashlib.sha1(f"{seed}{ch}".encode()).hexdigest()[:8], 16))
+    shear = params["slant"] + float(rng.normal(0, 0.012))
+    sx = params["xscale"] * float(rng.uniform(0.98, 1.02))
+    sy = params["yscale"] * float(rng.uniform(0.985, 1.015))
+    ang = float(np.deg2rad(rng.normal(0, 0.6)))      # small rotation, in radians for the matrix
+    base = h * float(params.get("baseline", BASELINE))
+    # x' = w/2 + sx*dx + sx*(shear-ang)*dy ; y' = base + sy*dy + sy*ang*dx, dx/dy relative to (w/2, base)
+    mat = np.array(
+        [
+            [sx, sx * (shear - ang), (w / 2) * (1 - sx) - sx * (shear - ang) * base],
+            [sy * ang, sy, base * (1 - sy) - sy * ang * (w / 2)],
+        ],
+        dtype=np.float32,
+    )
+    out = cv2.warpAffine(mask, mat, (w, h), flags=cv2.INTER_LINEAR, borderValue=0)
+    out = (out > 96).astype(np.uint8) * 255
+    weight = int(params["weight"])
+    if weight:
+        k = np.ones((2, 2), np.uint8)
+        out = cv2.dilate(out, k, iterations=weight) if weight > 0 else cv2.erode(out, k, iterations=-weight)
+    return _shift_inside(out)
+
+
+class StyleFitEngine(Engine):
+    """Offline baseline: imprint measured style parameters on a skeleton font."""
+
+    name = "stylefit"
+    version = 2
+    summary = "analytic baseline: fit slant/weight/proportion from your glyphs (no model, no GPU)"
+    kind = "analytic"
+
+    def __init__(self):
+        self._params: dict[str, dict] = {}
+
+    def params(self, style_font: Path, size: int, script: str) -> dict:
+        if script in self._params:
+            return self._params[script]
+        p = fit_style(style_font, size, script)
+        if p.get("fitted"):
+            info(f"stylefit[{script}]: slant={p['slant']} weight={p['weight']} "
+                 f"yscale={p['yscale']} xscale={p['xscale']} seeds={p['seeds']!r}")
+            self._params[script] = p
+            return p
+        # No glyphs of this script to measure: hand slant and stroke weight are
+        # traits of the writer, so borrow them and keep this script's skeleton.
+        other = "cjk" if script == "latin" else "latin"
+        q = self._params.get(other) or fit_style(style_font, size, other)
+        if q.get("fitted"):
+            spec = fonts.find(script)
+            borrowed = {**q, "seeds": "", "borrowed_from": other}
+            if spec:
+                borrowed["skeleton"], borrowed["skeleton_index"] = spec["path"], spec["index"]
+            self._params[script] = borrowed
+            info(f"stylefit[{script}]: no {script} glyphs to measure; borrowing "
+                 f"slant/weight from {other} and keeping the {script} skeleton")
+            return borrowed
+        warn(f"stylefit[{script}]: no glyphs to measure; that script stays unstyled")
+        self._params[script] = dict(NEUTRAL, seeds="", skeleton=None, skeleton_index=0, baseline=SF_BASELINE)
+        return self._params[script]
+
+    def generate(self, chars, style, *, size, seed, progress=None):
+        if style is None:
+            die(f"engine {self.name} needs --style <font of your real glyphs>")
+        style = Path(style)
+        if style.suffix.lower() not in (".ttf", ".otf", ".ttc"):
+            die(f"engine {self.name} reads a font of your glyphs (.ttf), not {style.name}; "
+                f"build one first with `hwpdf font` or use --engine stub")
+        own_cmap = glyphs_of(style)
+        try:
+            own_font = ImageFont.truetype(str(style), int(size * STYLE_SCALE))
+        except Exception as exc:
+            die(f"cannot read the style font {style} ({exc})")
+        out: dict[str, dict] = {}
+        for ch in chars:
+            if ord(ch) in own_cmap:
+                out[ch] = {"mask": _draw(own_font, ch, size, SF_BASELINE),
+                           "meta": {"engine": self.name, "source": "real"}}   # a glyph you really wrote
+            else:
+                script = "cjk" if util.is_cjk(ch) else "latin"
+                p = self.params(style, size, script)
+                base = None
+                if p.get("skeleton") and ord(ch) in glyphs_of(Path(p["skeleton"])):
+                    skel = ImageFont.truetype(p["skeleton"], int(size * STYLE_SCALE), index=p["skeleton_index"])
+                    base = _draw(skel, ch, size, SF_BASELINE)
+                if base is None:
+                    spec = fonts.find_for(script, ch)
+                    if spec is None:
+                        warn(f"no skeleton font can draw {ch!r}; leaving it to the fallback font")
+                        continue
+                    base = _draw(ImageFont.truetype(spec["path"], int(size * STYLE_SCALE), index=spec["index"]), ch, size, SF_BASELINE)
+                out[ch] = {"mask": apply_style(base, p, ch, seed),
+                           "meta": {"engine": self.name, "source": "fitted"}}
+            if progress:
+                progress(ch, out[ch])
+        return out
+
+
+ENGINES: dict[str, type[Engine]] = {e.name: e for e in (StubEngine, DiffFontEngine, StyleFitEngine)}
+
+
+def default_engine(style: Path | None) -> str:
+    if style is not None and Path(style).suffix.lower() in (".ttf", ".otf", ".ttc"):
+        return "stylefit"
+    if ENGINES["diff-font"]().ready():
+        return "diff-font"
+    return "stub"
+
+
+def get_engine(name: str | None, style: Path | None = None) -> Engine:
     if not name:
-        name = "stub" if not ENGINES["diff-font"]().ready() else "diff-font"
+        name = default_engine(style)
     cls = ENGINES.get(name)
     if cls is None:
         die(f"unknown engine {name!r}; try: {', '.join(ENGINES)}")
@@ -315,8 +562,8 @@ def models_dir() -> Path:
 
 
 # ------------------------------------------------------------------ build
-def _cache_key(engine: str, style: Path | None, size: int, seed: int) -> str:
-    h = hashlib.sha256(f"{engine}|{size}|{seed}|{SCHEMA_VERSION}".encode())
+def _cache_key(engine: Engine, style: Path | None, size: int, seed: int) -> str:
+    h = hashlib.sha256(f"{engine.name}.{engine.version}|{size}|{seed}|{SCHEMA_VERSION}".encode())
     if style is not None and Path(style).exists():
         h.update(Path(style).read_bytes())
     return h.hexdigest()[:16]
@@ -334,6 +581,7 @@ def build(
     smooth: int = 1,
     tracking: float = 0.07,
     cache: bool = True,
+    retries: int = 1,
     with_punct: bool = True,
     limit: int = 0,
     style_required: bool = True,
@@ -349,13 +597,13 @@ def build(
         chars = chars + [c for c in CJK_PUNCT if c not in chars]
     if limit:
         chars = chars[:limit]
-    eng = get_engine(engine)
+    eng = get_engine(engine, style)
     if eng.kind == "model" and not eng.ready():
         rows = ", ".join(f"{k}: {v}" for k, v in eng.doctor())
         die(f"engine {eng.name} is not ready ({rows}); run `hwpdf synth doctor`", 3)
 
     t0 = time.time()
-    key = _cache_key(eng.name, style, size, seed)
+    key = _cache_key(eng, style, size, seed)
     cache_dir = util.ensure_dir(Path(cache_root()) / "synth" / key) if cache else None
     generated: dict[str, dict] = {}
     hits = 0
@@ -373,32 +621,43 @@ def build(
             hits += 1
         else:
             todo.append(ch)
+    rejected: dict[str, list[str]] = {}
+    retried = 0
     if todo:
         info(f"engine {eng.name}: generating {len(todo)} glyph(s)"
              + (f", {hits} from cache" if hits else ""))
-        generated.update(eng.generate(todo, style, size=size, seed=seed, progress=progress))
+        for attempt in range(max(0, retries) + 1):
+            batch = eng.generate(todo, style, size=size, seed=seed + attempt * 7919, progress=progress)
+            good, bad = {}, {}
+            for ch, g in batch.items():
+                if _passes(g["mask"], ch, size):
+                    good[ch] = g
+                else:
+                    bad[ch] = inspect_glyph(g["mask"], ch)["reasons"]
+            generated.update(good)
+            todo = list(bad)
+            if not todo:
+                break
+            if attempt < retries:
+                retried += len(todo)
+                warn(f"retry {attempt + 1}/{retries} for {len(todo)} glyph(s) that failed the gate")
     elif hits:
         info(f"engine {eng.name}: all {hits} glyph(s) from cache")
 
     glyphs: dict[str, dict] = {}
-    rejected: dict[str, list[str]] = {}
+    for ch in chars:
+        if ch not in generated:
+            rejected[ch] = ["no glyph survived the gate after retries"]
     for ch, g in generated.items():
         mask = g["mask"]
-        ys, xs = np.nonzero(mask > 0)
-        if not len(ys):
-            rejected[ch] = ["empty"]
+        v = verdict(mask, ch, size)
+        if not v["ok"]:
+            rejected[ch] = v["reasons"]
             continue
+        ys, xs = np.nonzero(mask > 0)
         y0, y1 = int(ys.min()), int(ys.max())
         x0, x1 = int(xs.min()), int(xs.max())
-        cropped = mask[y0 : y1 + 1, x0 : x1 + 1]
-        verdict = inspect_glyph(mask, ch)
-        if not verdict["ok"] and all(r.startswith("too flat") for r in verdict["reasons"]):
-            if reference_box(ch, size) < GATE["box_min"] * 1.5:
-                verdict = {**verdict, "ok": True, "reasons": [], "flat_ok": True}
-        if not verdict["ok"]:
-            rejected[ch] = verdict["reasons"]
-            continue
-        glyphs[ch] = {"mask": cropped, "bbox": [x0, y0, x1 + 1, y1 + 1]}
+        glyphs[ch] = {"mask": mask[y0 : y1 + 1, x0 : x1 + 1], "bbox": [x0, y0, x1 + 1, y1 + 1]}
 
     if rejected:
         sample = ", ".join(sorted(rejected)[:12])
@@ -423,6 +682,8 @@ def build(
         "requested": len(chars),
         "built": len(glyphs),
         "rejected": rejected,
+        "gate": {"passed": len(glyphs) - 1, "rejected": len(rejected), "retried": retried,
+                 "attempts": max(0, retries) + 1, "thresholds": GATE},
         "cached": hits,
         "size": size,
         "seed": seed,
@@ -548,6 +809,31 @@ def doctor_rows() -> list[tuple[str, str, str]]:
     return rows
 
 
+def cmd_verify(args) -> int:
+    font = Path(args.font)
+    if not font.exists():
+        die(f"font not found: {font}")
+    if args.charset:
+        chars = resolve_charset(args.charset)
+    else:
+        chars = resolve_charset(str(CHARSET_FILE)) + [chr(c) for c in range(0x20, 0x7F)]
+    if not args.no_punct and any(util.is_cjk(c) for c in chars):
+        chars += [c for c in CJK_PUNCT if c not in chars]
+    chars = list(dict.fromkeys(c for c in chars if c != " "))
+    cmap = glyphs_of(font)
+    missing = [c for c in chars if ord(c) not in cmap]
+    covered = len(chars) - len(missing)
+    pct = 100.0 * covered / max(1, len(chars))
+    print(f"{font}  {covered}/{len(chars)} requested characters ({pct:.1f}%)")
+    if missing:
+        sample = "".join(missing[:80])
+        warn(f"{len(missing)} missing (fallback font will draw them): {sample}"
+             + (" …" if len(missing) > 80 else ""))
+        return 1
+    info("complete: every requested character has a glyph")
+    return 0
+
+
 def cmd_synth(args) -> int:
     action = args.action
     if action == "charsets":
@@ -562,15 +848,16 @@ def cmd_synth(args) -> int:
         width = max(len(r[0]) for r in rows)
         for name, status, detail in rows:
             print(f"{name:<{width}}  {status:<22} {detail}")
-        ready = [s for n, s, _ in rows if n in ENGINES and s.startswith("ready")]
-        model_ready = any(
-            s.startswith("ready") and ENGINES[n].kind == "model" for n, s, _ in rows if n in ENGINES
-        )
-        if not model_ready:
-            warn("no model engine is ready: `synth build` will only run the stub fixture; "
-                 "see PLAN.md §8 (S4) and requirements-synth.txt")
+        usable = [n for n, st, _ in rows if n in ENGINES and st.startswith("ready") and ENGINES[n].kind != "fixture"]
+        if not any(ENGINES[n].kind == "model" for n in usable):
+            info("model engine: not installed (optional, needs the weights + license work in PLAN.md §8 S4); "
+                 f"usable now: {', '.join(usable) or 'none'}")
+        if not usable:
+            warn("no usable engine: `hwpdf synth build` can only run the stub fixture")
             return 2
         return 0
+    if action == "verify":
+        return cmd_verify(args)
     if action == "build":
         out = Path(args.out) if args.out else Path("hw/font.ttf")
         util.ensure_dir(out.parent)
@@ -585,6 +872,7 @@ def cmd_synth(args) -> int:
             smooth=args.smooth,
             tracking=args.tracking,
             cache=not args.no_cache,
+            retries=args.retries,
             with_punct=not args.no_punct,
             limit=args.limit,
         )
@@ -614,10 +902,16 @@ def main(argv=None) -> int:
     b.add_argument("--family", default="My Handwriting")
     b.add_argument("--smooth", type=int, default=1, choices=(0, 1))
     b.add_argument("--tracking", type=float, default=0.07)
+    b.add_argument("--retries", type=int, default=1, help="re-sample a glyph that fails the gate N extra times")
     b.add_argument("--no-cache", action="store_true")
     b.add_argument("--no-punct", action="store_true", help="do not add CJK punctuation for CJK charsets")
     b.add_argument("--limit", type=int, default=0, help="only the first N characters (smoke tests)")
     b.set_defaults(func=cmd_synth)
+    v = sub.add_parser("verify", help="report characters a built font cannot draw")
+    v.add_argument("--font", required=True)
+    v.add_argument("--charset", default=None, help="default: data/cjk-common.txt + ascii")
+    v.add_argument("--no-punct", action="store_true")
+    v.set_defaults(func=cmd_synth)
     sp = sub.add_parser("specimen", help="contact sheet of a built font (optionally vs. real glyphs)")
     sp.add_argument("--font", required=True)
     sp.add_argument("-o", "--out", default="specimen.png")

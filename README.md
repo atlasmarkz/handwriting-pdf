@@ -87,12 +87,14 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 | `hwpdf synth build --style 字迹图.png --charset ascii -o hw/font.ttf` | 推断未写过的字形 → 复用矢量化 → TTF（`--charset` 支持 `ascii`/`digits`/`alpha`/`cjk`/`common3500`/`@文件`/字面字符串） |
 | `hwpdf synth charsets` | 列出内置字表 |
 | `hwpdf synth specimen --font hw/font.ttf --real hw/font-real.ttf -o sheet.png` | 生成字形对照表（左：你写的；右：推断的），跑模型前先目检 |
+| `hwpdf synth verify --font hw/font.ttf [--charset cjk]` | 报告字体覆盖率：哪些字还得靠回退字体 |
+| `hwpdf profile save --name me --font real.ttf --synth-font hw/font.ttf` | 把 synth 字体绑进 profile；之后 `render --profile me` 自动用它补没写过的字 |
 
 ## 限制
 
 - **一字一形**：没有连笔衔接、同字异形、笔压与墨色浓淡；行距/基线抖动是模拟的。
 - **字库只覆盖你写过的字**：中文正文按去重字数逐字写，每页 30 格；缺字用系统楷体兜底并告警。
-  `hwpdf synth` 是实验性的第二引擎，当前只带 `stub` 夹具（确定性抖动，**不是**风格迁移），用于打通管线与测试。
+  `hwpdf synth` 是实验性的第二引擎。两个可用引擎：`stylefit`（解析式基线：从你写过的字量出倾角/笔宽/比例，再印到系统骨架字上；纯 CPU、不下载）和 `stub`（测试夹具，确定性抖动，**不是**风格迁移）。真正的少样本扩散模型（`diff-font`）还缺权重与许可（PLAN.md §8 S4），`hwpdf synth doctor` 会说清楚缺什么。
 - 生成的 PDF 文字层可搜索/复制（嵌入的是真字体）。
 - 仅供本人字迹的个人文稿使用；不用于签名、合同、票据、证件。
 
