@@ -41,6 +41,16 @@ hwpdf render --font hw/font.ttf --text-file letter.txt -o hw/letter.pdf
 
 打印要点：**A4 / 100%（实际大小）**，深色笔（0.5 mm+），每格一个字，照片里四角黑块要完整。
 
+## 只写了几个字，也能排整页（可选）
+
+`synth` 用你写过的字估计倾斜、笔宽与比例，再印到系统骨架上——没写过的字也能按你的样子排出来。纯 CPU、不下载、不联网。
+
+<p align="center"><img src="docs/poc/stylefit-page.png" width="680" alt="7 个手写字母 + 合成字排出的中英混排页面"></p>
+
+- 一条命令：`hwpdf synth build --style 你的字.ttf --charset cjk -o synth.ttf`（3755 字约 10 秒）
+- 它**不是**风格迁移：字形结构来自系统无衬线骨架，只带上你的倾角与笔宽；有真模型的话用 `--engine external --provider` 接进来
+- 细节、实测数字与已知限制：[docs/poc/stylefit.md](docs/poc/stylefit.md)
+
 ## 三种输入，按可靠性排序
 
 | 输入 | 命令 | 说明 |
