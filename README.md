@@ -89,6 +89,14 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 | `hwpdf synth specimen --font hw/font.ttf --real hw/font-real.ttf -o sheet.png` | 生成字形对照表（左：你写的；右：推断的），跑模型前先目检 |
 | `hwpdf synth verify --font hw/font.ttf [--charset cjk]` | 报告字体覆盖率：哪些字还得靠回退字体 |
 | `hwpdf profile save --name me --font real.ttf --synth-font hw/font.ttf` | 把 synth 字体绑进 profile；之后 `render --profile me` 自动用它补没写过的字 |
+| `python scripts/eval_synth.py --font hw/synth.ttf --real hw/font.ttf -o report.md` | 出评测报告：覆盖率、质量门、原样复用 IoU、倾角/笔宽是否真的印上去了 |
+
+开发/回归：
+
+```bash
+python -m unittest discover -s tests -v     # 单元测试，0.05s，不需要 torch
+python scripts/eval_synth.py --font build/stylefit/font-all.ttf --real build/selftest/font.ttf --charset alpha
+```
 
 ## 限制
 
@@ -97,6 +105,12 @@ bash install.sh            # macOS / Linux，默认两个目录都装
   `hwpdf synth` 是实验性的第二引擎。两个可用引擎：`stylefit`（解析式基线：从你写过的字量出倾角/笔宽/比例，再印到系统骨架字上；纯 CPU、不下载）和 `stub`（测试夹具，确定性抖动，**不是**风格迁移）。真正的少样本扩散模型（`diff-font`）还缺权重与许可（PLAN.md §8 S4），`hwpdf synth doctor` 会说清楚缺什么。
 - 生成的 PDF 文字层可搜索/复制（嵌入的是真字体）。
 - 仅供本人字迹的个人文稿使用；不用于签名、合同、票据、证件。
+
+## 隐私与权重
+
+- 图片、字体、PDF 全程不离开本机；`hwpdf` 不发起任何网络请求，也没有遥测。
+- 仓库不含任何模型权重；synth 的 `stylefit` 是解析式的（零下载），`diff-font` 需要用户自行放置权重到 `~/.handwriting-pdf/models/`（`HWPDF_MODEL_DIR` 可改）。
+- 候选扩散模型的权重大部分没有明确许可证（见 PLAN.md §8 S4），因此不会被随包分发；分发前需逐个确认许可。
 
 ## License
 

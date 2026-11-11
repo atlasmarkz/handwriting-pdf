@@ -1,12 +1,12 @@
 ---
 name: handwriting-pdf
 description: "Turn someone's own handwriting into a reusable TrueType font and a stable profile, then lay out any text in that handwriting and export a print-ready PDF. Inputs: a photo of their writing, a practice sheet they fill in, or a PDF that already shows their handwriting (embedded font or text layer). Fully local (no network, no cloud), Windows/macOS/Linux. Use when the user uploads a handwriting image or PDF and asks for a handwritten-style document, letter, note or font; also use to build a personal 'my handwriting' font once and reuse it."
-when_to_use: "手写字迹, 我的笔迹, 字迹生成pdf, 照我的字写, 手写体, 手写稿, 手写信, 手写笔记, 模仿我的字, handwriting, handwritten, my handwriting, handwriting font, handwritten pdf, write like me, turn this into handwriting, sample to font"
+when_to_use: "手写字迹, 我的笔迹, 字迹生成pdf, 照我的字写, 手写体, 手写稿, 手写信, 手写笔记, 模仿我的字, 补字, 没写过的字, handwriting, handwritten, my handwriting, handwriting font, handwritten pdf, write like me, turn this into handwriting, sample to font, unseen characters"
 license: MIT
 allowed-tools: Read Write Edit Bash
 compatibility: "Python 3.10+ with pip; dependencies (opencv-python-headless, numpy, pillow, reportlab, fonttools) are installed by install.ps1 / install.sh into a private venv. No network access at run time."
 metadata:
-  version: "0.1.0"
+  version: "0.2.0"
   category: document
 ---
 
@@ -148,6 +148,36 @@ hwpdf render --profile alex --text-file letter.txt -o letter.pdf
 - A profile built from a PDF only covers characters that appear in that PDF. Check with
   `hwpdf coverage --font <profile font> --text-file <new doc>` before promising a full document.
 
+## Synth — characters the user never wrote (experimental)
+
+A document almost always needs characters the user never wrote; in Chinese this is the norm, not
+the exception. Two ways to fill them, in order of honesty:
+
+1. **Neutral fallback** (default, predictable): `render --fallback auto` picks a system handwriting
+   font; the page mixes their hand with a printed or neutral hand, and `render` reports every
+   character drawn that way.
+2. **Synth inference** (`hwpdf synth`, still experimental): build a second font that covers the
+   full charset by borrowing the measurable parts of their style — slant, stroke weight, x-height,
+   glyph width — and stamping them onto a system skeleton glyph.
+
+```
+hwpdf synth doctor                              # which engines are usable, what is missing
+hwpdf synth build --style hw/font.ttf --charset common3500 -o hw/synth.ttf
+hwpdf synth specimen --font hw/synth.ttf --real hw/font.ttf -o hw/sheet.png   # inspect first
+hwpdf synth verify --font hw/synth.ttf --charset common3500                   # coverage / missing
+hwpdf profile save --name alex --font hw/font.ttf --synth-font hw/synth.ttf
+hwpdf render --profile alex --text-file doc.txt -o out.pdf                    # synth fills the gaps
+```
+
+Engines: `stylefit` (analytic — no download, no GPU, deterministic; Chinese glyphs keep their
+Songti skeleton and only pick up the user's slant/weight) and `stub` (test fixture, **not** style
+transfer). The diffusion engine `diff-font` needs weights whose licences are unresolved (PLAN.md
+§8 S4) — `synth doctor` says so rather than pretending.
+
+**Say what it is:** characters they wrote are reproduced verbatim; inferred characters are "their
+slant and weight on a printed skeleton". Do not tell the user the inferred half "looks like them".
+Check `meta.gate` in `<font>.json` (`rejected` should be 0) and look at the specimen before shipping.
+
 ## Rules
 
 1. **Local only.** Never upload the sample, the font or the output; no API calls.
@@ -178,6 +208,7 @@ hwpdf render --profile alex --text-file letter.txt -o letter.pdf
 | `hwpdf render --profile NAME --text-file doc.txt -o out.pdf` | PDF using a saved profile's font + defaults |
 | `hwpdf profile save/list/show/remove ...` | freeze / inspect the reusable handwriting profile (writes `PROMPT.md`) |
 | `hwpdf preview --pdf out.pdf -d DIR [--dpi 150]` | PDF pages → PNG for visual review |
+| `hwpdf synth doctor / build / specimen / verify / charsets` | optional inference engine: full-charset font from a written subset (see the Synth section) |
 | `hwpdf selftest -d DIR [--messy]` | synthetic end-to-end smoke test |
 
 ## Limits (state them when relevant)
@@ -185,7 +216,8 @@ hwpdf render --profile alex --text-file letter.txt -o letter.pdf
 - One glyph per character: no connected cursive, no natural variation between occurrences, no
   pressure/ink texture. Spacing jitter is simulated, glyph shapes are not.
 - CJK: the font contains only written characters. 30 cells per page; a 300-character letter needs
-  a 10-page practice sheet.
+  a 10-page practice sheet. `hwpdf synth build --charset common3500` is the shortcut, but inferred
+  CJK is a system skeleton in the user's slant, not their actual brushwork.
 - The PDF text layer is real text (searchable/copyable) in the generated font.
 - Photos must show all four black corner squares of the practice sheet.
 
