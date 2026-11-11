@@ -258,11 +258,20 @@ def find(kind: str, refresh: bool = False) -> dict | None:
     return found[0] if found else None
 
 
-def find_for(kind: str, text: str = "", refresh: bool = False) -> dict | None:
-    """Like find(), but prefer a face that covers every character of `text`."""
+def find_for(kind: str, text: str = "", refresh: bool = False, prefer: str | None = None) -> dict | None:
+    """Like find(), but prefer a face that covers every character of `text`.
+
+    ``prefer`` narrows the style class first: "sans" (uniform strokes — closest to a pen for
+    CJK skeletons), "serif", or "hand". It only reorders; it never filters a class out entirely.
+    """
     found = candidates(kind, refresh=refresh)
     if not found:
         return None
+    if prefer:
+        wanted = {"sans": 1, "serif": 2, "hand": 3}.get(prefer)
+        preferred = [s for s in found if s["style"] == wanted]
+        if preferred:
+            found = preferred + [s for s in found if s not in preferred]
     need = {ord(ch) for ch in text if ch not in "\r\n\t "}
     if need:
         for spec in found:

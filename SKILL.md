@@ -170,8 +170,8 @@ hwpdf profile save --name alex --font hw/font.ttf --synth-font hw/synth.ttf
 hwpdf render --profile alex --text-file doc.txt -o out.pdf                    # synth fills the gaps
 ```
 
-Engines: `stylefit` (analytic — no download, no GPU, deterministic; Chinese glyphs keep their
-Songti skeleton and only pick up the user's slant/weight) and `stub` (test fixture, **not** style
+Engines: `stylefit` (analytic — no download, no GPU, deterministic; Chinese glyphs keep a system
+sans skeleton and only pick up the user's slant/weight) and `stub` (test fixture, **not** style
 transfer). The diffusion engine `diff-font` needs weights whose licences are unresolved (PLAN.md
 §8 S4) — `synth doctor` says so rather than pretending.
 
@@ -218,7 +218,7 @@ Check `meta.gate` in `<font>.json` (`rejected` should be 0) and look at the spec
   pressure/ink texture. Spacing jitter is simulated, glyph shapes are not.
 - CJK: the font contains only written characters. 30 cells per page; a 300-character letter needs
   a 10-page practice sheet. `hwpdf synth build --charset common3500` is the shortcut, but inferred
-  CJK is a system skeleton in the user's slant, not their actual brushwork.
+  CJK is a system sans skeleton in the user's slant, not their actual brushwork.
 - The PDF text layer is real text (searchable/copyable) in the generated font.
 - Photos must show all four black corner squares of the practice sheet.
 

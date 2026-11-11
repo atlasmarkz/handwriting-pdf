@@ -5,6 +5,7 @@ No torch: everything here works with the base requirements.
 """
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -120,3 +121,47 @@ class CacheKeyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GlyphSourceTests(unittest.TestCase):
+    """The cmap reader decides "did the user write this?" and "does the skeleton have it?"."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name) / "f.ttf"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_built_font_reports_its_codepoints(self):
+        synth.build(None, "AB1", self.out, engine="stub", cache=False, style_required=False)
+        cmap = synth.glyphs_of(self.out)
+        self.assertTrue({ord("A"), ord("B"), ord("1"), ord(" ")} <= cmap)
+
+    def test_missing_file_is_empty_not_an_error(self):
+        self.assertEqual(synth.glyphs_of(Path(self.tmp.name) / "nope.ttf"), set())
+
+    def test_skeleton_override_parses_the_face_index(self):
+        synth.build(None, "AB", self.out, engine="stub", cache=False, style_required=False)
+        old = os.environ.get("HWPDF_SKELETON")
+        os.environ["HWPDF_SKELETON"] = f"{self.out}#0"
+        try:
+            spec = synth.skeleton_spec("latin")
+        finally:
+            if old is None:
+                del os.environ["HWPDF_SKELETON"]
+            else:
+                os.environ["HWPDF_SKELETON"] = old
+        self.assertEqual((spec["path"], spec["index"]), (str(self.out), 0))
+
+    def test_missing_skeleton_override_fails_loudly(self):
+        old = os.environ.get("HWPDF_SKELETON")
+        os.environ["HWPDF_SKELETON"] = str(Path(self.tmp.name) / "absent.ttf")
+        try:
+            with self.assertRaises(SystemExit):
+                synth.skeleton_spec("cjk")
+        finally:
+            if old is None:
+                del os.environ["HWPDF_SKELETON"]
+            else:
+                os.environ["HWPDF_SKELETON"] = old

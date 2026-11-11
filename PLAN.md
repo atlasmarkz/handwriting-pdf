@@ -140,3 +140,6 @@
 **S5 落地细节**：`hwpdf profile save --synth-font <ttf>` 把 synth 字体复制进 profile 并记录 engine/style_sha256/gate；之后 `hwpdf render --profile <名字>` 对"没写过的字"自动用 synth 字体（显式 `--fallback` 优先）；profile 目录可用 `HWPDF_PROFILE_DIR` / `HWPDF_HOME` 改位置。
 
 **S4 之前的 `stylefit` 基线（已可用）**：不训练、不下载、纯 CPU——从你写过的字里量出倾角（列投影方差扫描）、笔宽、x 高/字宽比例，再用仿射+形态学把这些参数印到系统骨架字（中文宋体 / 拉丁 Bradley Hand）上；你写过的字直接原样复用。中文无样本时借用拉丁的倾角与笔宽。它是 S4 的对照基线（`--engine stylefit`，`doctor` 里显示 ready），不是风格迁移：笔画粗细变化、连笔、结构变形都不会被学会。
+
+
+**骨架修正（2026-11-11）**：CJK 骨架默认从宋体改为无衬线（黑体）——统一笔宽更接近钢笔，宋体的三角顿笔斜切后仍是印刷体观感；拉丁仍优先真手写体。起因是发现 `glyphs_of()` 读 `.ttc` 时没传 `fontNumber`，fontTools 返回空 cmap，导致**任何 TTC 骨架都被判定为缺字并静默回退到宋体**，骨架选择一直没真正生效。现在 `synth doctor` 会打印 cjk/latin 实际选用的骨架，`HWPDF_SKELETON`/`HWPDF_SKELETON_STYLE` 可覆盖；`stylefit` 版本号升到 4（缓存自动失效），并补了 4 个 cmap/骨架相关单测（共 15 个）。

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import sys
 import time
 from pathlib import Path
@@ -332,14 +333,19 @@ SF_BASELINE = 0.74
 _CMAP_CACHE: dict[str, set[int]] = {}
 
 
-def glyphs_of(font_path: Path) -> set[int]:
-    """Codepoints the font actually maps (a missing char would otherwise draw .notdef)."""
-    key = str(font_path)
+def glyphs_of(font_path: Path, index: int = 0) -> set[int]:
+    """Codepoints the font actually maps (a missing char would otherwise draw .notdef).
+
+    ``index`` selects the face inside a .ttc collection: fontTools reads the whole file as a
+    single SFNT otherwise and ends up with an empty cmap, which used to make every TTC
+    skeleton look "missing" and silently fall back to another font.
+    """
+    key = f"{font_path}#{index}"
     if key not in _CMAP_CACHE:
         try:
             from fontTools.ttLib import TTFont as _FTFont
 
-            _CMAP_CACHE[key] = set(_FTFont(key).getBestCmap())
+            _CMAP_CACHE[key] = set(_FTFont(str(font_path), fontNumber=index).getBestCmap())
         except Exception:
             _CMAP_CACHE[key] = set()
     return _CMAP_CACHE[key]
@@ -370,6 +376,32 @@ def _ink_and_box(mask: np.ndarray, size: int) -> tuple[float, float, float]:
     return float((mask > 0).mean()), float((ys.max() - ys.min() + 1) / size), float((xs.max() - xs.min() + 1) / size)
 
 
+def skeleton_spec(script: str, text: str = "") -> dict | None:
+    """The printed font that style gets stamped onto.
+
+    ``HWPDF_SKELETON=/path/font.ttc#0`` forces one (useful when the system has a better
+    Kai/handwriting face than the probe picks, or to compare skeletons side by side).
+    """
+    raw = os.environ.get("HWPDF_SKELETON", "").strip()
+    if raw:
+        path, _, idx = raw.partition("#")
+        path = Path(path).expanduser()
+        if not path.exists():
+            die(f"HWPDF_SKELETON points at a missing font: {path}")
+        spec = {"path": str(path), "index": int(idx) if idx.isdigit() else 0, "han": 0, "style": "env"}
+    else:
+        # A pen makes uniform strokes: for CJK a sans skeleton reads as handwriting far more
+        # than a serif one (宋体 keeps its 三角 flares even when sheared). Latin still prefers a
+        # real handwriting face when the system has one.
+        prefer = os.environ.get("HWPDF_SKELETON_STYLE") or ("sans" if script == "cjk" else "hand")
+        spec = fonts.find_for(script, "", prefer=prefer)
+    if spec is None:
+        return None
+    if text and not fonts.covers(spec, text):
+        return None
+    return spec
+
+
 def fit_style(style_font: Path, size: int, script: str = "latin") -> dict:
     """Measure slant / stroke weight / proportion on the glyphs the user wrote, for one script."""
     cmap = glyphs_of(style_font)
@@ -388,13 +420,13 @@ def fit_style(style_font: Path, size: int, script: str = "latin") -> dict:
     shear = max((float(sh) for sh in np.arange(-0.30, 0.301, 0.04)), key=lambda sh: _shear_score(stack, sh))
     ink, hh, ww = _ink_and_box(stack, size)
 
-    skel_spec = fonts.find(script)
+    skel_spec = skeleton_spec(script, "".join(seeds))
     if skel_spec is None:
         return dict(NEUTRAL, slant=round(shear, 3), seeds="".join(seeds), skeleton=None, skeleton_index=0)
     skel_font = ImageFont.truetype(skel_spec["path"], int(size * STYLE_SCALE), index=skel_spec["index"])
     skel_stack = np.zeros((size, size), np.uint8)
     for ch in seeds:
-        if ord(ch) in glyphs_of(Path(skel_spec["path"])):
+        if ord(ch) in glyphs_of(Path(skel_spec["path"]), skel_spec["index"]):
             skel_stack = np.maximum(skel_stack, _draw(skel_font, ch, size, SF_BASELINE))
     s_ink, s_h, s_w = _ink_and_box(skel_stack, size)
     return {
@@ -463,7 +495,7 @@ class StyleFitEngine(Engine):
     """Offline baseline: imprint measured style parameters on a skeleton font."""
 
     name = "stylefit"
-    version = 2
+    version = 4
     summary = "analytic baseline: fit slant/weight/proportion from your glyphs (no model, no GPU)"
     kind = "analytic"
 
@@ -484,7 +516,7 @@ class StyleFitEngine(Engine):
         other = "cjk" if script == "latin" else "latin"
         q = self._params.get(other) or fit_style(style_font, size, other)
         if q.get("fitted"):
-            spec = fonts.find(script)
+            spec = skeleton_spec(script)
             borrowed = {**q, "seeds": "", "borrowed_from": other}
             if spec:
                 borrowed["skeleton"], borrowed["skeleton_index"] = spec["path"], spec["index"]
@@ -517,7 +549,8 @@ class StyleFitEngine(Engine):
                 script = "cjk" if util.is_cjk(ch) else "latin"
                 p = self.params(style, size, script)
                 base = None
-                if p.get("skeleton") and ord(ch) in glyphs_of(Path(p["skeleton"])):
+                if p.get("skeleton") and ord(ch) in glyphs_of(
+                        Path(p["skeleton"]), p.get("skeleton_index", 0)):
                     skel = ImageFont.truetype(p["skeleton"], int(size * STYLE_SCALE), index=p["skeleton_index"])
                     base = _draw(skel, ch, size, SF_BASELINE)
                 if base is None:
@@ -806,6 +839,11 @@ def doctor_rows() -> list[tuple[str, str, str]]:
         if eng.kind == "model" and eng.weights:
             detail += f"; weights: {models_dir() / eng.weights[0]}"
         rows.append((name, status, detail))
+    for script in ("cjk", "latin"):
+        spec = skeleton_spec(script)
+        rows.append((f"skeleton {script}",
+                     f"{spec['path']}#{spec['index']}" if spec else "none",
+                     "the printed face stylefit stamps style onto"))
     rows.append(("python", sys.version.split()[0], sys.executable))
     rows.append(("models", "dir", str(models_dir())))
     rows.append(("cache", "dir", str(cache_root() / "synth")))
