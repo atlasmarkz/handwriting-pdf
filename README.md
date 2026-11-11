@@ -15,9 +15,9 @@
 <p align="center"><sub><b>中文</b> · <a href="README.en.md">English</a></sub></p>
 
 <p align="center">
-  <img src="docs/hero-zh.png" width="720" alt="用自己写出来的字排出的中文页">
+  <img src="docs/hero-zh.png" width="720" alt="一句中文手写体排出的页面">
 </p>
-<p align="center"><sub>示例：8 个真字（“永和九年，岁在癸丑”）+ 合成补齐，排出整页中文——横线纸、逐字倾斜、墨色可调</sub></p>
+<p align="center"><sub>示例：一句随手写的话，用一款 OFL 手写字体（马善政行楷）排出来——横线纸、逐字倾斜、墨色可调；换成你自己做的字库，就是你的笔迹</sub></p>
 
 ## 它解决什么
 
@@ -51,6 +51,10 @@ hwpdf render --font hw/font.ttf --text-file letter.txt -o hw/letter.pdf
 |---|---|---|
 | **预制字体** | `hwpdf fonts` 列出目录，`hwpdf fonts --fetch zhimangxing` 下载（OFL-1.1，可商用可嵌入），`hwpdf render --font-name 志莽行书` | 想要好看的字，不想写样本 |
 | **你的样本** | 练习纸 → `hwpdf scan` → `hwpdf font` → `hwpdf profile save`；缺字由 `synth` 按你的样本补 | 想让它**像你写的** |
+
+<p align="center"><img src="docs/photo-sample.png" width="620" alt="随手拍的一张中文手写照片"></p>
+
+上面这张就是"你的样本"的真实输入：手机随手拍的一行字。工具会逐字切出来、描成轮廓、做成 `.ttf`——但**连笔和低分辨率会让切分变难**（每个字只有 30 像素左右、还有笔画跨格），所以更稳的做法是用工具生成的练习纸：一格一字、四角有定位块，切分不会错。
 
 两条路共用一套渲染与版面。样本那条路还做不到"以假乱真"：合成字的笔画粗细与字面大小仍会和真实字有可见差异（上图第二行：写过的"永和九年岁在癸丑"是原笔迹，其余是合成的）。样本那条路会先量你的**书写习惯**——倾角、笔重、字宽、行距抖动——再据此排版；预制字体那条路同样会量一遍，让整页保持字体自带的节奏：
 

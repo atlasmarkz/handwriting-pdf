@@ -78,6 +78,18 @@ def estimate_metrics(glyphs: dict) -> dict:
     return m
 
 
+def _ps_name(family: str) -> str:
+    """A PostScript name has to be printable ASCII.
+
+    reportlab refuses to load a font whose psName carries non-ASCII bytes, and a
+    Chinese family name ("我的笔迹") is exactly what a user would type. Keep the
+    family name as written; derive a safe PostScript name from it.
+    """
+    keep = [c for c in family if (c.isascii() and (c.isalnum() or c in "-_"))]
+    slug = "".join(keep).strip("-")
+    return slug or "HWFont"
+
+
 def build(
     glyphs: dict,
     out_path,
@@ -191,9 +203,9 @@ def build(
         {
             "familyName": family,
             "styleName": "Regular",
-            "uniqueFontIdentifier": f"{family.replace(' ', '')};1.0",
+            "uniqueFontIdentifier": f"{_ps_name(family)};1.0",
             "fullName": family,
-            "psName": family.replace(" ", "") + "-Regular",
+            "psName": _ps_name(family) + "-Regular",
             "version": "Version 1.000",
         }
     )

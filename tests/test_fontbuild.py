@@ -77,5 +77,34 @@ class BaselineTests(unittest.TestCase):
         self.assertGreaterEqual(ymin, -1, "cell glyphs still bottom out on the baseline")
 
 
+class NameTests(unittest.TestCase):
+    """A Chinese family name must still produce a loadable font.
+
+    reportlab rejects a font whose PostScript name carries non-ASCII bytes, and
+    "我的笔迹" is exactly what a user types into --family. The fix derives an ASCII
+    PostScript name while keeping the family name as written.
+    """
+
+    def test_chinese_family_name_gets_an_ascii_postscript_name(self):
+        out = Path(tempfile.mkdtemp()) / "cn.ttf"
+        fontbuild.build({"永": ink((60, 57, 252, 254))}, out, family="我的笔迹")
+        f = TTFont(out)
+        ps = f["name"].getDebugName(6)
+        self.assertTrue(ps and ps.isascii() and ps.isprintable(), f"psName = {ps!r}")
+        self.assertNotIn("-Regular-Regular", ps)
+        # the family name the user typed is preserved for display
+        self.assertEqual(f["name"].getDebugName(1), "我的笔迹")
+
+    def test_ascii_family_name_is_used_as_is(self):
+        out = Path(tempfile.mkdtemp()) / "en.ttf"
+        fontbuild.build({"a": ink((60, 57, 252, 254))}, out, family="My Hand")
+        self.assertEqual(TTFont(out)["name"].getDebugName(6), "MyHand-Regular")
+
+    def test_empty_family_name_falls_back_to_hwfont(self):
+        out = Path(tempfile.mkdtemp()) / "x.ttf"
+        fontbuild.build({"a": ink((60, 57, 252, 254))}, out, family="笔迹")
+        self.assertTrue(TTFont(out)["name"].getDebugName(6).startswith("HWFont"))
+
+
 if __name__ == "__main__":
     unittest.main()
