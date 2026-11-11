@@ -12,6 +12,8 @@
   <img alt="offline" src="https://img.shields.io/badge/100%25%20local-no%20network-16a34a?style=flat-square">
 </p>
 
+<p align="center"><sub><b>中文</b> · <a href="README.en.md">English</a></sub></p>
+
 <p align="center">
   <img src="docs/hero.png" width="720" alt="用自己写出来的字体排出的一封短信">
 </p>
