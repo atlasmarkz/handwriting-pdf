@@ -89,3 +89,7 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 ## License
 
 MIT
+
+## Roadmap
+
+少样本手写风格迁移（只给少量字迹、推断其余字形）的技术选型与分阶段计划见 [PLAN.md](PLAN.md)。
