@@ -8,12 +8,11 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 
 import vectorize
-from util import is_cjk
+from util import CJK_PUNCT, is_cjk
 
 EM = 1000
 X_HEIGHT_CHARS = set("acemnorsuvwxz")
 DESCENDERS = set("gjpqy")
-CJK_PUNCT = set("，。！？；：、（）《》“”‘’…—·")
 
 
 def _height(g) -> float:
@@ -127,6 +126,15 @@ def build(
         if s is None:
             s = m["s_latin"] or m["s_cjk"]
         x0, y0, x1, y1 = g["bbox"]
+        meta = g.get("meta") or {}
+        if meta.get("baseline_px") and meta.get("em_px"):
+            # synthesized glyphs carry the face's own baseline and em: keep real descenders and
+            # let ，。 sit above the baseline instead of gluing every bbox bottom to one line
+            baseline = float(meta["baseline_px"])
+            if cjk:
+                s = EM / float(meta["em_px"])
+        else:
+            baseline = base_map.get(ch, _bottom(g))
         w = (x1 - x0) * s
         if cjk:
             # never let a full-width glyph exceed the em box, otherwise advances collide
@@ -134,12 +142,12 @@ def build(
                 s = s * (0.98 * EM / w)
                 w = (x1 - x0) * s
             adv = EM
+            # full-width punctuation is centred in its em box (as Heiti draws it); left-aligning
+            # it pushes the gap entirely to one side of the mark
             lsb = (EM - w) / 2.0
         else:
             lsb = 0.02 * EM
             adv = w + tracking * EM
-
-        baseline = base_map.get(ch, _bottom(g))
 
         def transform(p, y0=y0, s=s, lsb=lsb, baseline=baseline):
             # p is local to the cropped mask; bbox supplies the global baseline offset

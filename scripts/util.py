@@ -44,6 +44,10 @@ def slug(char: str) -> str:
     return "u%04X" % ord(char)
 
 
+# Full-width CJK punctuation: small ink, full-width advance, and it hugs the character before it
+CJK_PUNCT = "，。、；：！？…—–·‘’“”（）《》〈〉【】「」『』～"
+
+
 def is_cjk(ch: str) -> bool:
     o = ord(ch)
     return (

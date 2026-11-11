@@ -46,7 +46,7 @@ GATE = {
 # Punctuation is legitimately small and flat: judging it like a letter would reject
 # every period and comma a model produces. Only "should be tall" glyphs get the
 # ink/height floors; all glyphs still have to be non-empty, unclipped and not blobs.
-CJK_PUNCT = "，。、；：！？…—–·‘’“”（）《》〈〉【】「」『』～"
+CJK_PUNCT = util.CJK_PUNCT
 SMALL_GLYPHS = set(
     "\"'`.,;:-_=~^!?*·"
     "、。，；：！？…—–''“”‘’（）《》〈〉【】「」『』·～"
@@ -242,6 +242,10 @@ class Engine:
     def generate(self, chars: list[str], style: Path | None, *, size: int, seed: int,
                  progress=None) -> dict[str, dict]:
         raise NotImplementedError
+
+    def ink(self, size: int) -> dict:
+        """Where this engine draws: baseline and em in mask pixels (empty if unknown)."""
+        return {}
 
 
 class StubEngine(Engine):
@@ -580,6 +584,10 @@ class StyleFitEngine(Engine):
     def __init__(self):
         self._params: dict[str, dict] = {}
 
+    def ink(self, size: int) -> dict:
+        # masks are drawn at 0.62 em with the baseline at 0.74 of the cell
+        return {"baseline_px": SF_BASELINE * size, "em_px": STYLE_SCALE * size}
+
     def params(self, style_font: Path, size: int, script: str) -> dict:
         if script in self._params:
             return self._params[script]
@@ -619,10 +627,12 @@ class StyleFitEngine(Engine):
         except Exception as exc:
             die(f"cannot read the style font {style} ({exc})")
         out: dict[str, dict] = {}
+        # where the glyphs were drawn: fontbuild keeps true descenders and punctuation heights
+        ink = {"baseline_px": SF_BASELINE * size, "em_px": STYLE_SCALE * size}
         for ch in chars:
             if ord(ch) in own_cmap:
                 out[ch] = {"mask": _draw(own_font, ch, size, SF_BASELINE),
-                           "meta": {"engine": self.name, "source": "real"}}   # a glyph you really wrote
+                           "meta": {"engine": self.name, "source": "real", **ink}}
             else:
                 script = "cjk" if util.is_cjk(ch) else "latin"
                 p = self.params(style, size, script)
@@ -638,7 +648,7 @@ class StyleFitEngine(Engine):
                         continue
                     base = _draw(ImageFont.truetype(spec["path"], int(size * STYLE_SCALE), index=spec["index"]), ch, size, SF_BASELINE)
                 out[ch] = {"mask": apply_style(base, p, ch, seed),
-                           "meta": {"engine": self.name, "source": "fitted"}}
+                           "meta": {"engine": self.name, "source": "fitted", **ink}}
             if progress:
                 progress(ch, out[ch])
         return out
@@ -775,7 +785,10 @@ def build(
         ys, xs = np.nonzero(mask > 0)
         y0, y1 = int(ys.min()), int(ys.max())
         x0, x1 = int(xs.min()), int(xs.max())
-        glyphs[ch] = {"mask": mask[y0 : y1 + 1, x0 : x1 + 1], "bbox": [x0, y0, x1 + 1, y1 + 1]}
+        glyphs[ch] = {"mask": mask[y0 : y1 + 1, x0 : x1 + 1],
+                      "bbox": [x0, y0, x1 + 1, y1 + 1],
+                      # a cache hit only stores the mask, so the engine supplies the metrics again
+                      "meta": {**(g.get("meta") or {}), **eng.ink(size)}}
 
     if rejected:
         sample = ", ".join(sorted(rejected)[:12])
