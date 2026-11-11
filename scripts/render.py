@@ -1,6 +1,7 @@
 """Lay text out in the generated handwriting font and produce a PDF."""
 from __future__ import annotations
 
+import math
 import random
 from pathlib import Path
 
@@ -49,6 +50,22 @@ def pick_fallback(explicit: str | None, needs_cjk: bool) -> str | None:
     return register(spec["path"], "HWFBZ" if needs_cjk else "HWFBL", spec["index"])
 
 
+# CJK line-breaking (禁则): a line must not start with a closing mark or end with an opening one
+NO_LINE_START = "，。、；：！？…—）〕】》」』”’·%‰,.;:!?)]}"
+NO_LINE_END = "（〔【《「『“‘([{"
+
+
+def _split_at(cur: str, ch: str) -> tuple[str, str]:
+    """Decide where a too-wide character breaks the line, respecting the punctuation rules."""
+    carry = ch
+    while cur and (carry[0] in NO_LINE_START or cur[-1] in NO_LINE_END):
+        if len(cur) == 1 and carry[0] in NO_LINE_START:
+            break  # a single-character line beats overflow, but only when nothing else is left
+        carry = cur[-1] + carry
+        cur = cur[:-1]
+    return cur, carry
+
+
 def wrap(text: str, font: str, size: float, maxw: float, space_w: float,
          cmap: set[int] | None = None, fb: str | None = None) -> list[str]:
     """Greedy wrap that measures each character with the font it will actually be drawn in."""
@@ -77,8 +94,8 @@ def wrap(text: str, font: str, size: float, maxw: float, space_w: float,
                 cur = ""
                 continue
             if is_cjk(ch) or not cur:
-                lines.append(cur)
-                cur = ch
+                line, cur = _split_at(cur, ch)
+                lines.append(line)
                 continue
             idx = cur.rfind(" ")
             if idx > 0:
@@ -178,6 +195,9 @@ def render(
         c.translate(x0, y + dy0)
         c.rotate(rot)
         cx = 0.0
+        # a slow wobble shared by the whole line: real hands drift, they do not re-roll every letter
+        wobble_phase = rng.uniform(0.0, math.tau)
+        wobble_rate = rng.uniform(0.7, 1.3) / (size * 2.5)
         for ch in line:
             if ch == " ":
                 cx += space_w
@@ -187,13 +207,21 @@ def render(
                 if fb is None:
                     cx += size * 0.5
                     continue
-                c.setFont(fb, size)
+                face = fb
             else:
-                c.setFont(body, size)
+                face = body
+            # per-glyph: a little bigger or smaller, its own tilt, a wobble that follows the line
+            k = 1.0 + rng.uniform(-0.012, 0.018) * jitter
+            dy = (rng.uniform(-0.22, 0.22) * (size / 12.0)
+                  + math.sin(wobble_phase + cx * wobble_rate) * 0.30) * jitter
+            c.saveState()
+            c.translate(cx, dy)
+            c.rotate(rng.uniform(-0.45, 0.45) * jitter)
+            c.setFont(face, size * k)
             c.setFillColorRGB(*ink_rgb)
-            dy = rng.uniform(-0.30, 0.30) * (size / 12.0) * jitter
-            c.drawString(cx, dy, ch)
-            cx += pdfmetrics.stringWidth(ch, body if ord(ch) in cmap else (fb or body), size)
+            c.drawString(0, 0, ch)
+            c.restoreState()
+            cx += pdfmetrics.stringWidth(ch, face, size * k)
             cx += rng.uniform(-0.02, 0.02) * size * jitter
         c.restoreState()
         y -= line_h
