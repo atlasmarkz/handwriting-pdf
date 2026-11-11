@@ -44,6 +44,7 @@ GATE = {
 # Punctuation is legitimately small and flat: judging it like a letter would reject
 # every period and comma a model produces. Only "should be tall" glyphs get the
 # ink/height floors; all glyphs still have to be non-empty, unclipped and not blobs.
+CJK_PUNCT = "，。、；：！？…—–·''“”‘’（）《》〈〉【】「」『』～"
 SMALL_GLYPHS = set(
     "\"'`.,;:-_=~^!?*·"
     "、。，；：！？…—–''“”‘’（）《》〈〉【】「」『』·～"
@@ -124,6 +125,33 @@ def write_charset(out: Path = CHARSET_FILE) -> int:
 
 
 # ------------------------------------------------------------------ quality
+_REF_BOX: dict[tuple[str, int], float] = {}
+
+
+def reference_box(ch: str, size: int) -> float:
+    """Height of this char in a system font, as a fraction of the em box (0 when unknown).
+
+    Used to tell "the model collapsed this glyph" apart from "this glyph is legitimately
+    flat" — 一 and - are flat by nature, a smeared 稿 is not.
+    """
+    key = (ch, size)
+    if key in _REF_BOX:
+        return _REF_BOX[key]
+    ratio = 0.0
+    spec = fonts.find_for("cjk" if util.is_cjk(ch) else "latin", ch) or fonts.find("cjk" if util.is_cjk(ch) else "latin")
+    if spec is not None:
+        try:
+            font = ImageFont.truetype(spec["path"], int(size * 0.72), index=spec["index"])
+            img = Image.new("L", (size, size), 0)
+            ImageDraw.Draw(img).text((size / 2, size * BASELINE), ch, fill=255, font=font, anchor="ms")
+            ys, _ = np.nonzero(np.array(img) > 0)
+            ratio = float((ys.max() - ys.min() + 1) / size) if len(ys) else 0.0
+        except Exception:
+            ratio = 0.0
+    _REF_BOX[key] = ratio
+    return ratio
+
+
 def expects_tall(ch: str) -> bool:
     if ch in SMALL_GLYPHS:
         return False
@@ -306,6 +334,7 @@ def build(
     smooth: int = 1,
     tracking: float = 0.07,
     cache: bool = True,
+    with_punct: bool = True,
     limit: int = 0,
     style_required: bool = True,
 ) -> dict:
@@ -314,6 +343,10 @@ def build(
     if style is not None and not Path(style).exists():
         die(f"style sample not found: {style}")
     chars = resolve_charset(charset)
+    if with_punct and any(util.is_cjk(c) for c in chars):
+        # A CJK font that leaves 。，、 to the system fallback looks stitched together;
+        # synthesize them along with the text glyphs unless the caller opts out.
+        chars = chars + [c for c in CJK_PUNCT if c not in chars]
     if limit:
         chars = chars[:limit]
     eng = get_engine(engine)
@@ -328,14 +361,15 @@ def build(
     hits = 0
 
     def progress(ch: str, g: dict) -> None:
-        nonlocal hits
         if cache_dir is not None:
-            np.save(cache_dir / f"{util.slug(ch)}.npy", g["mask"])
+            # PNG keeps these lossless but ~30x smaller than .npy for 3755 glyphs
+            Image.fromarray(g["mask"]).save(cache_dir / f"{util.slug(ch)}.png")
 
     todo = []
     for ch in chars:
-        if cache_dir is not None and (cache_dir / f"{util.slug(ch)}.npy").exists():
-            generated[ch] = {"mask": np.load(cache_dir / f"{util.slug(ch)}.npy"), "meta": {"cached": True}}
+        cached = cache_dir / f"{util.slug(ch)}.png" if cache_dir is not None else None
+        if cached is not None and cached.exists():
+            generated[ch] = {"mask": np.array(Image.open(cached)), "meta": {"cached": True}}
             hits += 1
         else:
             todo.append(ch)
@@ -358,6 +392,9 @@ def build(
         x0, x1 = int(xs.min()), int(xs.max())
         cropped = mask[y0 : y1 + 1, x0 : x1 + 1]
         verdict = inspect_glyph(mask, ch)
+        if not verdict["ok"] and all(r.startswith("too flat") for r in verdict["reasons"]):
+            if reference_box(ch, size) < GATE["box_min"] * 1.5:
+                verdict = {**verdict, "ok": True, "reasons": [], "flat_ok": True}
         if not verdict["ok"]:
             rejected[ch] = verdict["reasons"]
             continue
@@ -416,6 +453,72 @@ def cache_root() -> Path:
         alt = Path(tempfile.gettempdir()) / "handwriting-pdf-cache"
         alt.mkdir(parents=True, exist_ok=True)
         return alt
+
+
+# ------------------------------------------------------------------ specimen
+def specimen(
+    font: Path,
+    out: Path,
+    chars: str = "ascii",
+    *,
+    real: Path | None = None,
+    cols: int = 12,
+    cell: int = 120,
+    label: bool = True,
+) -> Path:
+    """Contact sheet of a built font, optionally next to the user's real glyphs."""
+    items = resolve_charset(chars)
+    if len(items) > 4000:
+        items = items[:4000]
+    scale = 0.40 if real else (0.72 if any(util.is_cjk(c) for c in items) else 0.62)
+    syn_font = ImageFont.truetype(str(font), int(cell * scale))
+    real_font = ImageFont.truetype(str(real), int(cell * scale)) if real else None
+    per_row = max(1, cols)
+    rows = (len(items) + per_row - 1) // per_row
+    pad = 8
+    cell_h = cell + (18 if label else 0)
+    width = per_row * (cell + pad) + pad
+    sheet = Image.new("L", (width, rows * (cell_h + pad) + pad), 255)
+    draw = ImageDraw.Draw(sheet)
+    # PIL's default bitmap font has no CJK coverage: labels would come out as boxes.
+    cjk = fonts.find("cjk")
+    small = (
+        ImageFont.truetype(cjk["path"], 11, index=cjk["index"])
+        if cjk and any(util.is_cjk(c) for c in items)
+        else ImageFont.load_default()
+    )
+    for i, ch in enumerate(items):
+        r, c = divmod(i, per_row)
+        x = pad + c * (cell + pad)
+        y = pad + r * (cell_h + pad)
+        draw.rectangle([x, y, x + cell, y + cell], outline=200)
+        if real_font is not None:
+            half = cell // 2
+            draw.line([x + half, y, x + half, y + cell], fill=215)
+            draw.text((x + half // 2, y + cell // 2), ch, font=real_font, fill=30, anchor="mm")
+            draw.text((x + half + half // 2, y + cell // 2), ch, font=syn_font, fill=30, anchor="mm")
+        else:
+            draw.text((x + cell // 2, y + cell // 2), ch, font=syn_font, fill=20, anchor="mm")
+        if label:
+            draw.text((x + cell // 2, y + cell + 2), ch, font=small, fill=90, anchor="ma")
+    sheet = sheet.resize((width, sheet.height))
+    out = Path(out)
+    util.ensure_dir(out.parent)
+    sheet.save(out)
+    return out
+
+
+def cmd_specimen(args) -> int:
+    out = specimen(
+        Path(args.font),
+        Path(args.out),
+        args.chars,
+        real=Path(args.real) if args.real else None,
+        cols=args.cols,
+        cell=args.cell,
+    )
+    info(f"specimen: {out}")
+    return 0
 
 
 # ------------------------------------------------------------------ doctor
@@ -482,6 +585,7 @@ def cmd_synth(args) -> int:
             smooth=args.smooth,
             tracking=args.tracking,
             cache=not args.no_cache,
+            with_punct=not args.no_punct,
             limit=args.limit,
         )
         return 0
@@ -511,8 +615,17 @@ def main(argv=None) -> int:
     b.add_argument("--smooth", type=int, default=1, choices=(0, 1))
     b.add_argument("--tracking", type=float, default=0.07)
     b.add_argument("--no-cache", action="store_true")
+    b.add_argument("--no-punct", action="store_true", help="do not add CJK punctuation for CJK charsets")
     b.add_argument("--limit", type=int, default=0, help="only the first N characters (smoke tests)")
     b.set_defaults(func=cmd_synth)
+    sp = sub.add_parser("specimen", help="contact sheet of a built font (optionally vs. real glyphs)")
+    sp.add_argument("--font", required=True)
+    sp.add_argument("-o", "--out", default="specimen.png")
+    sp.add_argument("--chars", default="ascii")
+    sp.add_argument("--real", default=None, help="font of the user's real glyphs, drawn left of each cell")
+    sp.add_argument("--cols", type=int, default=12)
+    sp.add_argument("--cell", type=int, default=120)
+    sp.set_defaults(func=cmd_specimen)
     a = ap.parse_args(argv)
     return a.func(a)
 

@@ -86,6 +86,7 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 | `hwpdf synth doctor` | 检查 synth 引擎、模型权重、缓存目录；未就绪时返回非零并给出安装指引 |
 | `hwpdf synth build --style 字迹图.png --charset ascii -o hw/font.ttf` | 推断未写过的字形 → 复用矢量化 → TTF（`--charset` 支持 `ascii`/`digits`/`alpha`/`cjk`/`common3500`/`@文件`/字面字符串） |
 | `hwpdf synth charsets` | 列出内置字表 |
+| `hwpdf synth specimen --font hw/font.ttf --real hw/font-real.ttf -o sheet.png` | 生成字形对照表（左：你写的；右：推断的），跑模型前先目检 |
 
 ## 限制
 

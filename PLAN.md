@@ -133,4 +133,4 @@
 | **S5** profile/charset 集成 | 与现有工作流合体 | profile `type: synth`（记录 style hash、引擎、参数）、`--charset` 常用字预生成、缺字按需生成 | `hwpdf render` 直接吃 synth profile；同一 profile 二次渲染不触发推理 |
 | **S6** 评测与文档 | 可发布、可复现 | 自动指标脚本（SSIM/缺字率/12pt 可读性）、SKILL.md 增补、许可与隐私说明 | 指标脚本一条命令出报告；文档明确"默认本地、权重不入库" |
 
-当前状态：S0、S1 完成；S2 进行中。
+当前状态：S0–S2 完成；S3（质量门加固）进行中。
