@@ -185,3 +185,46 @@ class ExtendTests(unittest.TestCase):
         meta = synth.extend(self.out, None, "A", engine="stub", cache=False)
         self.assertEqual(meta["added"], "")
         self.assertEqual(synth.glyphs_of(self.out), synth.glyphs_of(self.out))
+
+
+PROVIDER = """
+import numpy as np
+
+def generate(style, chars, size=320, seed=0):
+    out = {}
+    for ch in chars:
+        m = np.zeros((size, size), dtype=np.uint8)
+        m[size // 3:size // 3 + size // 4, size // 3:size // 3 + size // 4] = 255
+        out[ch] = m
+    return out
+"""
+
+
+class ExternalEngineTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.provider = self.dir / "provider.py"
+        self.provider.write_text(PROVIDER)
+        self.out = self.dir / "f.ttf"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_provider_script_can_draw_the_glyphs(self):
+        synth.build(None, "AB", self.out, engine="external", provider=self.provider,
+                    cache=False, style_required=False)
+        self.assertTrue({ord("A"), ord("B")} <= synth.glyphs_of(self.out))
+
+    def test_provider_version_tracks_the_script(self):
+        first = synth.get_engine("external", provider=self.provider).version
+        self.provider.write_text(PROVIDER + "\n# changed\n")
+        second = synth.get_engine("external", provider=self.provider).version
+        self.assertNotEqual(first, second)
+
+    def test_a_provider_without_generate_fails_loudly(self):
+        bad = self.dir / "bad.py"
+        bad.write_text("X = 1\n")
+        eng = synth.get_engine("external", provider=bad)
+        with self.assertRaises(SystemExit):
+            eng.generate(["A"], None, size=320, seed=0)

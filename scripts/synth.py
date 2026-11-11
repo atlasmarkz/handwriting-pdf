@@ -505,6 +505,70 @@ def apply_style(mask: np.ndarray, params: dict, ch: str, seed: int) -> np.ndarra
     return _shift_inside(out)
 
 
+class ExternalEngine(Engine):
+    """Your own model, behind a 20-line adapter file.
+
+    The adapter is a Python file with:
+
+        def generate(style, chars, size=320, seed=0):
+            return {ch: mask}     # mask: 2-D array, nonzero = ink
+
+    `style` is the path to your font/sample (may be None), `chars` the characters to draw.
+    hwpdf handles the gate, the cache, the page and the TTF; you only draw masks.
+    """
+
+    name = "external"
+    kind = "external"
+    summary = "runs a provider script you supply (see docs/poc or PLAN.md §8 S4)"
+
+    def __init__(self, provider: str | Path | None = None):
+        self.provider = Path(provider) if provider else None
+        if self.provider is not None and self.provider.exists():
+            # different scripts must not share a raster cache
+            digest = hashlib.sha256(self.provider.read_bytes()).hexdigest()[:8]
+            self.version = int(digest, 16)
+
+    def missing(self) -> list[str]:
+        return [] if self.provider and self.provider.exists() else [str(self.provider or "no --provider")]
+
+    def ready(self) -> bool:
+        return bool(self.provider and self.provider.exists())
+
+    def doctor(self) -> list[tuple[str, str]]:
+        return [("provider", str(self.provider) if self.provider else
+                 "not set; pass --provider path.py to build")]
+
+    def _load(self):
+        assert self.provider is not None
+        spec = importlib.util.spec_from_file_location("hwpdf_provider", self.provider)
+        if spec is None or spec.loader is None:
+            die(f"cannot load provider: {self.provider}")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        fn = getattr(mod, "generate", None)
+        if not callable(fn):
+            die(f"{self.provider} has no generate(style, chars, size=, seed=) function")
+        return fn
+
+    def generate(self, chars, style, *, size, seed, progress=None):
+        if not self.ready():
+            die(f"provider not found: {self.provider}")
+        raw = self._load()(style, chars, size=size, seed=seed) or {}
+        out: dict[str, dict] = {}
+        for ch, mask in raw.items():
+            if ch not in chars:
+                continue
+            m = np.asarray(mask)
+            if m.ndim == 3:
+                m = m[..., :3].mean(axis=2)
+            if m.shape != (size, size):
+                m = np.array(Image.fromarray(m.astype(np.uint8)).resize((size, size), Image.LANCZOS))
+            out[ch] = {"mask": (m > 0).astype(np.uint8) * 255, "meta": {"source": "external"}}
+            if progress:
+                progress(ch, out[ch])
+        return out
+
+
 class StyleFitEngine(Engine):
     """Offline baseline: imprint measured style parameters on a skeleton font."""
 
@@ -591,12 +655,15 @@ def default_engine(style: Path | None) -> str:
     return "stub"
 
 
-def get_engine(name: str | None, style: Path | None = None) -> Engine:
+def get_engine(name: str | None, style: Path | None = None,
+               provider: str | Path | None = None) -> Engine:
     if not name:
         name = default_engine(style)
+    if name == "external":
+        return ExternalEngine(provider)
     cls = ENGINES.get(name)
     if cls is None:
-        die(f"unknown engine {name!r}; try: {', '.join(ENGINES)}")
+        die(f"unknown engine {name!r}; try: {', '.join(ENGINES)} or external")
     return cls()
 
 
@@ -623,6 +690,7 @@ def build(
     out: Path,
     *,
     engine: str | None = None,
+    provider: str | Path | None = None,
     size: int = CANVAS,
     seed: int = 0,
     family: str = "My Handwriting",
@@ -634,8 +702,8 @@ def build(
     limit: int = 0,
     style_required: bool = True,
 ) -> dict:
-    eng = get_engine(engine, style)
-    if style is None and style_required and (engine or "") != "stub":
+    eng = get_engine(engine, style, provider)
+    if style is None and style_required and (engine or "") not in ("stub", "external"):
         # Only an explicitly named fixture engine may run without a sample; a silent
         # fallback to stub output would look like a real synthesis result.
         die("need --style <your font or handwriting image> (or --engine stub for a smoke test)")
@@ -860,6 +928,8 @@ def doctor_rows() -> list[tuple[str, str, str]]:
         rows.append((f"skeleton {script}",
                      f"{spec['path']}#{spec['index']}" if spec else "none",
                      "the printed face stylefit stamps style onto"))
+    rows.append(("external", "adapter protocol",
+                 "synth build --engine external --provider my_model.py (see docs/synth-provider.md)"))
     rows.append(("python", sys.version.split()[0], sys.executable))
     rows.append(("models", "dir", str(models_dir())))
     rows.append(("cache", "dir", str(cache_root() / "synth")))
@@ -923,6 +993,7 @@ def cmd_synth(args) -> int:
             args.charset,
             out,
             engine=args.engine,
+            provider=args.provider,
             size=args.size,
             seed=args.seed,
             family=args.family,
@@ -1019,7 +1090,10 @@ def main(argv=None) -> int:
     b.add_argument("--style", default=None, help="image/photo of your handwriting")
     b.add_argument("--charset", required=True, help="ascii | digits | alpha | cjk | common3500 | @file | literal")
     b.add_argument("-o", "--out", default=None)
-    b.add_argument("--engine", default=None)
+    b.add_argument("--engine", default=None,
+                   help="stub | stylefit | external (needs --provider) | diff-font")
+    b.add_argument("--provider", default=None,
+                   help="your own adapter file: generate(style, chars, size=, seed=) -> {char: mask}")
     b.add_argument("--size", type=int, default=CANVAS)
     b.add_argument("--seed", type=int, default=0)
     b.add_argument("--family", default="My Handwriting")

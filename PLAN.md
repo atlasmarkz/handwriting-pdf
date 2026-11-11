@@ -139,6 +139,10 @@
 
 **S5 落地细节**：`hwpdf profile save --synth-font <ttf>` 把 synth 字体复制进 profile 并记录 engine/style_sha256/gate；之后 `hwpdf render --profile <名字>` 对"没写过的字"自动用 synth 字体（显式 `--fallback` 优先）；profile 目录可用 `HWPDF_PROFILE_DIR` / `HWPDF_HOME` 改位置。
 
+**S4 的接入面（已完成）**：模型不再需要改 hwpdf 的代码——写一个 `generate(style, chars, size=, seed=) -> {字: 掩码}`
+的适配器，用 `hwpdf synth build --engine external --provider my_model.py` 就能复用质量门、缓存与排版，见
+`docs/synth-provider.md`。S4 剩下的只是选模型、拿权重、验许可、跑对照，这三件事都等用户决策。
+
 **S4 之前的 `stylefit` 基线（已可用）**：不训练、不下载、纯 CPU——从你写过的字里量出倾角（列投影方差扫描）、笔宽、x 高/字宽比例，再用仿射+形态学把这些参数印到系统骨架字（中文宋体 / 拉丁 Bradley Hand）上；你写过的字直接原样复用。中文无样本时借用拉丁的倾角与笔宽。它是 S4 的对照基线（`--engine stylefit`，`doctor` 里显示 ready），不是风格迁移：笔画粗细变化、连笔、结构变形都不会被学会。
 
 
