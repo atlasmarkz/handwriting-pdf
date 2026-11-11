@@ -165,6 +165,7 @@ hwpdf synth doctor                              # which engines are usable, what
 hwpdf synth build --style hw/font.ttf --charset common3500 -o hw/synth.ttf
 hwpdf synth specimen --font hw/synth.ttf --real hw/font.ttf -o hw/sheet.png   # inspect first
 hwpdf synth verify --font hw/synth.ttf --charset common3500                   # coverage / missing
+hwpdf synth eval --font hw/synth.ttf --real hw/font.ttf -o hw/report.md      # numbers for the report
 hwpdf profile save --name alex --font hw/font.ttf --synth-font hw/synth.ttf
 hwpdf render --profile alex --text-file doc.txt -o out.pdf                    # synth fills the gaps
 ```

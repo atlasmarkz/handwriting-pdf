@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: byte-compile
+        run: python -m compileall -q scripts
+      - name: unit tests
+        run: python -m unittest discover -s tests -v
+      - name: synthetic end-to-end
+        run: python scripts/hwpdf.py selftest -d build/selftest --messy
+      - name: synth fixture engine
+        run: |
+          python scripts/hwpdf.py synth build --engine stub --charset alpha -o build/stub.ttf
+          python scripts/hwpdf.py synth verify --font build/stub.ttf --charset alpha
+      - name: upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.python-version }}
+          path: build/
+          retention-days: 7

@@ -89,13 +89,13 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 | `hwpdf synth specimen --font hw/font.ttf --real hw/font-real.ttf -o sheet.png` | 生成字形对照表（左：你写的；右：推断的），跑模型前先目检 |
 | `hwpdf synth verify --font hw/font.ttf [--charset cjk]` | 报告字体覆盖率：哪些字还得靠回退字体 |
 | `hwpdf profile save --name me --font real.ttf --synth-font hw/font.ttf` | 把 synth 字体绑进 profile；之后 `render --profile me` 自动用它补没写过的字 |
-| `python scripts/eval_synth.py --font hw/synth.ttf --real hw/font.ttf -o report.md` | 出评测报告：覆盖率、质量门、原样复用 IoU、倾角/笔宽是否真的印上去了 |
+| `hwpdf synth eval --font hw/synth.ttf --real hw/font.ttf -o report.md` | 出评测报告：覆盖率、质量门、原样复用 IoU、倾角/笔宽是否真的印上去了 |
 
 开发/回归：
 
 ```bash
 python -m unittest discover -s tests -v     # 单元测试，0.05s，不需要 torch
-python scripts/eval_synth.py --font build/stylefit/font-all.ttf --real build/selftest/font.ttf --charset alpha
+hwpdf synth eval --font build/stylefit/font-all.ttf --real build/selftest/font.ttf --charset alpha
 ```
 
 ## 限制

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import sys
 import time
 from pathlib import Path
 
@@ -586,8 +587,11 @@ def build(
     limit: int = 0,
     style_required: bool = True,
 ) -> dict:
-    if style_required and style is None:
-        die("need --style <image of your handwriting>")
+    eng = get_engine(engine, style)
+    if style is None and style_required and (engine or "") != "stub":
+        # Only an explicitly named fixture engine may run without a sample; a silent
+        # fallback to stub output would look like a real synthesis result.
+        die("need --style <your font or handwriting image> (or --engine stub for a smoke test)")
     if style is not None and not Path(style).exists():
         die(f"style sample not found: {style}")
     chars = resolve_charset(charset)
@@ -597,7 +601,6 @@ def build(
         chars = chars + [c for c in CJK_PUNCT if c not in chars]
     if limit:
         chars = chars[:limit]
-    eng = get_engine(engine, style)
     if eng.kind == "model" and not eng.ready():
         rows = ", ".join(f"{k}: {v}" for k, v in eng.doctor())
         die(f"engine {eng.name} is not ready ({rows}); run `hwpdf synth doctor`", 3)
@@ -880,8 +883,20 @@ def cmd_synth(args) -> int:
     die(f"unknown action {action!r}")
 
 
+def cmd_eval(a) -> int:
+    import eval_synth
+
+    return eval_synth.main(list(a.args))
+
+
 def main(argv=None) -> int:
     import argparse
+
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["eval"]:  # hand everything after `eval` to the evaluator verbatim
+        import eval_synth
+
+        return eval_synth.main(args[1:])
 
     ap = argparse.ArgumentParser(prog="synth", description="optional glyph synthesis engine")
     sub = ap.add_subparsers(dest="action", required=True)
@@ -920,6 +935,10 @@ def main(argv=None) -> int:
     sp.add_argument("--cols", type=int, default=12)
     sp.add_argument("--cell", type=int, default=120)
     sp.set_defaults(func=cmd_specimen)
+    ev = sub.add_parser("eval", help="measure a built font (coverage, gate, IoU, slant, weight)")
+    ev.add_argument("args", nargs=argparse.REMAINDER,
+                    help="options for scripts/eval_synth.py, e.g. --font f.ttf --real r.ttf")
+    ev.set_defaults(func=cmd_eval)
     a = ap.parse_args(argv)
     return a.func(a)
 
