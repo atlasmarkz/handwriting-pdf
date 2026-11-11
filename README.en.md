@@ -15,7 +15,7 @@
 <p align="center"><sub><a href="README.md">中文</a> · <b>English</b></sub></p>
 
 <p align="center">
-  <img src="docs/hero.png" width="720" alt="A short letter typeset in a font built from the writer's own hand">
+  <img src="docs/hero-en.png" width="720" alt="A short letter typeset in a font built from the writer's own hand">
 </p>
 <p align="center"><sub>Example: 26 letters turned into a font, then used to set a letter — ruled paper, per-line jitter, adjustable ink</sub></p>
 

@@ -15,9 +15,9 @@
 <p align="center"><sub><b>中文</b> · <a href="README.en.md">English</a></sub></p>
 
 <p align="center">
-  <img src="docs/hero.png" width="720" alt="用自己写出来的字体排出的一封短信">
+  <img src="docs/hero-zh.png" width="720" alt="用自己写出来的字排出的中文页">
 </p>
-<p align="center"><sub>示例：把 26 个字母做成字体后，用它排一封短信——横线纸、逐行抖动、墨色可调</sub></p>
+<p align="center"><sub>示例：8 个真字（“永和九年，岁在癸丑”）+ 合成补齐，排出整页中文——横线纸、逐字倾斜、墨色可调</sub></p>
 
 ## 它解决什么
 
