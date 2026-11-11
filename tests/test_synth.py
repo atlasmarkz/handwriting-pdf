@@ -144,6 +144,19 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class BenchTests(unittest.TestCase):
+    def test_reports_per_glyph_costs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            style = Path(tmp) / "real.ttf"
+            synth.build(None, "abc", style, engine="stub", cache=False)
+            b = synth.bench("stub", style, n=8)
+            self.assertEqual(b["engine"], "stub")
+            self.assertGreaterEqual(b["glyphs"], 4)
+            self.assertGreater(b["build_ms"], 0)
+            self.assertGreaterEqual(b["shape_ms"], 0.0)
+            self.assertAlmostEqual(b["per_3755_s"], b["build_ms"] * 3.755, places=6)
+
+
 class GlyphSourceTests(unittest.TestCase):
     """The cmap reader decides "did the user write this?" and "does the skeleton have it?"."""
 

@@ -17,6 +17,7 @@ import hashlib
 import importlib.util
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -1084,6 +1085,66 @@ def cmd_eval(a) -> int:
     return eval_synth.main(list(a.args))
 
 
+BENCH_CHARS = "永和九年岁在癸丑上下中今人天地之日月山水木火土金一二三四五六七八九十"
+
+
+def bench(engine: str | None = None, style: Path | None = None, *, n: int = 48,
+          size: int = CANVAS, seed: int = 0, provider=None) -> dict:
+    """How long one glyph actually takes, split into "engine" and "everything after it".
+
+    The question this answers: can a CPU-only machine afford to synthesize a whole
+    manuscript? Measure, don't guess — the engine can change per model.
+    """
+    eng = get_engine(engine, style, provider)
+    chars = list(BENCH_CHARS[: max(4, n)])
+    with tempfile.TemporaryDirectory() as tmp:
+        # Warm up first: font loading and the first outline build are one-off costs that
+        # would otherwise be charged to the first few glyphs.
+        warm = chars[:2]
+        list(eng.generate(warm, style, size=size, seed=seed))
+        build(style, "".join(warm), Path(tmp) / "warm.ttf", engine=engine,
+              provider=provider, size=size, seed=seed, cache=False,
+              style_required=False, with_punct=False)
+
+        t0 = time.perf_counter()
+        glyphs = eng.generate(chars, style, size=size, seed=seed)
+        engine_s = time.perf_counter() - t0
+        drawn = sum(1 for g in glyphs if g)
+
+        t1 = time.perf_counter()
+        build(style, "".join(chars), Path(tmp) / "bench.ttf", engine=engine,
+              provider=provider, size=size, seed=seed, cache=False,
+              style_required=False, with_punct=False)
+        build_s = time.perf_counter() - t1
+    per_engine = engine_s / max(1, drawn) * 1000.0
+    per_build = build_s / max(1, drawn) * 1000.0
+    return {
+        "engine": eng.name,
+        "kind": eng.kind,
+        "glyphs": drawn,
+        "engine_ms": per_engine,
+        "build_ms": per_build,
+        "shape_ms": max(0.0, per_build - per_engine),
+        "per_1000_s": per_build * 1000 / 1000.0,
+        "per_3755_s": per_build * 3755 / 1000.0,
+    }
+
+
+def cmd_bench(a) -> int:
+    style = Path(a.style) if a.style else None
+    if style is not None and not style.exists():
+        die(f"style sample not found: {style}")
+    b = bench(a.engine, style, n=a.n, seed=a.seed, provider=a.provider)
+    print(f"engine      {b['engine']} ({b['kind']})")
+    print(f"glyphs      {b['glyphs']} measured")
+    print(f"engine      {b['engine_ms']:.2f} ms/glyph")
+    print(f"vectorize   {b['shape_ms']:.2f} ms/glyph  (trace + outline + TTF assembly)")
+    print(f"total       {b['build_ms']:.2f} ms/glyph")
+    print(f"extrapolated 1000 chars: {b['per_1000_s']:.1f} s   full 3755-char set: {b['per_3755_s']:.0f} s")
+    print("(a second build of the same set reuses the glyph cache and is much faster)")
+    return 0
+
+
 def extend(font: Path, style: Path | None, chars: str, *, out: Path | None = None,
            engine: str | None = None, seed: int = 0, size: int = CANVAS,
            cache: bool = True) -> dict:
@@ -1196,6 +1257,13 @@ def main(argv=None) -> int:
     x.add_argument("--out", default=None, help="write here instead of updating --font in place")
     x.add_argument("--no-cache", action="store_true")
     x.set_defaults(func=cmd_extend)
+    bn = sub.add_parser("bench", help="time one glyph: engine vs vectorize+TTF, then extrapolate")
+    bn.add_argument("--style", default=None, help="your font or a handwriting image")
+    bn.add_argument("--engine", default=None)
+    bn.add_argument("--provider", default=None)
+    bn.add_argument("--seed", type=int, default=0)
+    bn.add_argument("-n", type=int, default=48, help="how many characters to measure")
+    bn.set_defaults(func=cmd_bench)
     ev = sub.add_parser("eval", help="measure a built font (coverage, gate, IoU, slant, weight)")
     ev.add_argument("args", nargs=argparse.REMAINDER,
                     help="options for scripts/eval_synth.py, e.g. --font f.ttf --real r.ttf")
