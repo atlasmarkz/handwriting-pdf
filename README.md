@@ -99,6 +99,8 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 | `hwpdf synth specimen --font hw/font.ttf --real hw/font-real.ttf -o sheet.png` | 生成字形对照表（左：你写的；右：推断的），跑模型前先目检 |
 | `hwpdf synth verify --font hw/font.ttf [--charset cjk]` | 报告字体覆盖率：哪些字还得靠回退字体 |
 | `hwpdf profile save --name me --font real.ttf --synth-font hw/font.ttf` | 把 synth 字体绑进 profile；之后 `render --profile me` 自动用它补没写过的字 |
+| `hwpdf synth extend --font hw/synth.ttf --chars "龘"` | 往已有字库补字：只生成新字，其余从缓存重建（约 2 s，不再整库重跑） |
+| `hwpdf render --profile me --grow` | 排版时遇到缺字就地补进 profile 的 synth 字体 |
 | `hwpdf synth eval --font hw/synth.ttf --real hw/font.ttf -o report.md` | 出评测报告：覆盖率、质量门、原样复用 IoU、倾角/笔宽是否真的印上去了 |
 
 开发/回归：

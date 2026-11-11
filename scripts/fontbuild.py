@@ -28,15 +28,15 @@ def _row_baselines(glyphs: dict) -> dict[str, float]:
     """Cluster glyph bottoms into text lines (template rows or free-form lines)."""
     heights = [_height(g) for g in glyphs.values()]
     tol = max(4.0, 0.45 * float(np.median(heights)))
+    # sorted by bottom, so comparing with the last glyph in a row is enough: the old
+    # median-of-the-row anchor was quadratic (0.8 s for a 3900-glyph font)
     rows: list[list[str]] = []
     for ch in sorted(glyphs, key=lambda c: _bottom(glyphs[c])):
         b = _bottom(glyphs[ch])
-        if rows:
-            anchor = float(np.median([_bottom(glyphs[c]) for c in rows[-1]]))
-            if abs(b - anchor) <= tol:
-                rows[-1].append(ch)
-                continue
-        rows.append([ch])
+        if rows and b - _bottom(glyphs[rows[-1][-1]]) <= tol:
+            rows[-1].append(ch)
+        else:
+            rows.append([ch])
 
     out: dict[str, float] = {}
     for row in rows:
@@ -94,7 +94,9 @@ def build(
 
         k = np.ones((3, 3), np.uint8)
         for g in glyphs.values():
-            m = g["mask"]
+            m = g.get("mask")
+            if m is None:  # outlines came from the cache; there is no mask to thicken
+                continue
             g["mask"] = cv2.dilate(m, k, iterations=weight) if weight > 0 else cv2.erode(m, k, iterations=-weight)
     m = estimate_metrics(glyphs)
     base_map = m["baselines"]
@@ -112,7 +114,7 @@ def build(
 
     for ch in sorted(glyphs, key=ord):
         g = glyphs[ch]
-        mask = g["mask"]
+        mask = g.get("mask")  # absent when the caller cached the traced outline
         if ch == " ":
             nm = "space"
             glyf[nm] = TTGlyphPen(None).glyph()
@@ -153,7 +155,12 @@ def build(
             # p is local to the cropped mask; bbox supplies the global baseline offset
             return (lsb + p[0] * s, (baseline - (y0 + p[1])) * s)
 
-        contours = vectorize.trace(mask, eps=0.9)
+        contours = g.get("contours")
+        if contours is None:
+            if mask is None:
+                report.setdefault("failed", []).append(f"{ch}: no mask and no cached outline")
+                continue
+            contours = vectorize.trace(mask, eps=0.9)
         if not contours:
             report.setdefault("empty", []).append(ch)
             continue

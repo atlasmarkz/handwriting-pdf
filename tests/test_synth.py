@@ -118,6 +118,27 @@ class CacheKeyTests(unittest.TestCase):
         self.assertEqual(synth._cache_key(synth.StubEngine(), None, 320, 0),
                          synth._cache_key(synth.StubEngine(), None, 320, 0))
 
+    def test_a_rebuilt_style_font_keeps_the_key(self):
+        from fontTools.ttLib import TTFont
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "f.ttf"
+            synth.build(None, "AB", out, engine="stub", cache=False, style_required=False)
+            before = synth._cache_key(synth.StubEngine(), out, 320, 0)
+            font = TTFont(out)
+            font["head"].modified = font["head"].modified - 86400   # yesterday
+            font.save(out)                                          # a fresh timestamp
+            self.assertEqual(synth._cache_key(synth.StubEngine(), out, 320, 0), before)
+
+    def test_a_changed_glyph_changes_the_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "a.ttf"
+            second = Path(tmp) / "b.ttf"
+            synth.build(None, "AB", first, engine="stub", cache=False, style_required=False)
+            synth.build(None, "AC", second, engine="stub", cache=False, style_required=False)
+            self.assertNotEqual(synth._cache_key(synth.StubEngine(), first, 320, 0),
+                                synth._cache_key(synth.StubEngine(), second, 320, 0))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -185,6 +206,67 @@ class ExtendTests(unittest.TestCase):
         meta = synth.extend(self.out, None, "A", engine="stub", cache=False)
         self.assertEqual(meta["added"], "")
         self.assertEqual(synth.glyphs_of(self.out), synth.glyphs_of(self.out))
+
+
+class CacheTests(unittest.TestCase):
+    """Only glyphs that passed the gate may be reused, and outlines must skip re-tracing."""
+
+    class Half(synth.Engine):
+        name = "half"
+        version = 1
+        kind = "fixture"
+
+        def generate(self, chars, style, *, size, seed, progress=None):
+            out = {}
+            for ch in chars:
+                out[ch] = {"mask": mask() if ch == "a" else np.zeros((size, size), np.uint8),
+                           "meta": {}}
+            return out
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name) / "f.ttf"
+        self.cache = Path(self.tmp.name) / "cache"
+        self.old = os.environ.get("HWPDF_CACHE_DIR")
+        os.environ["HWPDF_CACHE_DIR"] = str(self.cache)
+        synth.ENGINES["half"] = self.Half
+
+    def tearDown(self):
+        synth.ENGINES.pop("half", None)
+        if self.old is None:
+            os.environ.pop("HWPDF_CACHE_DIR", None)
+        else:
+            os.environ["HWPDF_CACHE_DIR"] = self.old
+        self.tmp.cleanup()
+
+    def entries(self):
+        found = list((self.cache / "synth").rglob("*"))
+        return {p.stem for p in found if p.is_file()}
+
+    def test_rejected_glyphs_are_not_cached(self):
+        synth.build(None, "ab", self.out, engine="half", retries=0, style_required=False)
+        stems = self.entries()
+        self.assertIn("u0061", stems)
+        self.assertNotIn("u0062", stems)
+
+    def test_a_cached_outline_skips_tracing(self):
+        synth.build(None, "a", self.out, engine="half", style_required=False)
+        original = synth.vectorize.trace
+
+        def boom(*a, **k):
+            raise AssertionError("a cached outline should not be traced again")
+
+        synth.vectorize.trace = boom
+        try:
+            synth.build(None, "a", self.out, engine="half", style_required=False)
+        finally:
+            synth.vectorize.trace = original
+
+    def test_a_cached_rebuild_keeps_the_glyph(self):
+        synth.build(None, "a", self.out, engine="half", style_required=False)
+        first = synth.glyphs_of(self.out)
+        synth.build(None, "a", self.out, engine="half", style_required=False)
+        self.assertEqual(synth.glyphs_of(self.out), first)
 
 
 PROVIDER = """

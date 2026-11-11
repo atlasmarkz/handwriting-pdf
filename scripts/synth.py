@@ -26,6 +26,7 @@ from PIL import Image, ImageDraw, ImageFont
 import fontbuild
 import fonts
 import util
+import vectorize
 from util import die, info, warn
 
 SCHEMA_VERSION = 1
@@ -687,10 +688,32 @@ def models_dir() -> Path:
 
 
 # ------------------------------------------------------------------ build
+def _font_fingerprint(path: Path) -> bytes:
+    """Hash a font's tables, ignoring the timestamps in `head`.
+
+    A rebuilt copy of the same handwriting would otherwise invalidate every cached glyph
+    (the head table carries a modification time), so a whole rebuild would be regenerated.
+    """
+    raw = Path(path).read_bytes()
+    if raw[:4] not in (b"\x00\x01\x00\x00", b"OTTO", b"true", b"ttcf") or raw[:4] == b"ttcf":
+        return raw  # a collection or something exotic: fall back to the bytes
+    import struct
+
+    count = struct.unpack(">H", raw[4:6])[0]
+    h = hashlib.sha256()
+    for i in range(count):
+        tag, _sum, off, length = struct.unpack(">4sIII", raw[12 + 16 * i : 28 + 16 * i])
+        if tag == b"head":
+            continue  # created/modified/checkSumAdjustment only
+        h.update(tag)
+        h.update(raw[off : off + length])
+    return h.digest()
+
+
 def _cache_key(engine: Engine, style: Path | None, size: int, seed: int) -> str:
     h = hashlib.sha256(f"{engine.name}.{engine.version}|{size}|{seed}|{SCHEMA_VERSION}".encode())
     if style is not None and Path(style).exists():
-        h.update(Path(style).read_bytes())
+        h.update(_font_fingerprint(Path(style)))
     return h.hexdigest()[:16]
 
 
@@ -737,18 +760,48 @@ def build(
     hits = 0
 
     def progress(ch: str, g: dict) -> None:
+        # engines report here; nothing is cached until the gate has accepted the glyph
+        pass
+
+    def cache_paths(ch: str):
+        stem = cache_dir / util.slug(ch)
+        return stem.with_suffix(".png"), stem.with_suffix(".json")
+
+    def cache_glyph(ch: str, mask: np.ndarray, bbox: list[int]) -> dict:
+        """Trace the outline once and keep both the mask and the outline for the next run."""
+        contours = vectorize.trace(mask, eps=0.9)
         if cache_dir is not None:
-            # PNG keeps these lossless but ~30x smaller than .npy for 3755 glyphs
-            Image.fromarray(g["mask"]).save(cache_dir / f"{util.slug(ch)}.png")
+            png, js = cache_paths(ch)
+            # the outline saves re-tracing (most of a rebuild), the mask keeps it inspectable
+            Image.fromarray(mask).save(png)
+            util.save_json(js, {"bbox": bbox,
+                                "contours": [[[[round(float(x), 2), round(float(y), 2)] for x, y in c["pts"]],
+                                              bool(c["hole"])] for c in contours]})
+        return {"mask": mask, "bbox": bbox, "contours": contours}
 
     todo = []
     for ch in chars:
-        cached = cache_dir / f"{util.slug(ch)}.png" if cache_dir is not None else None
-        if cached is not None and cached.exists():
-            generated[ch] = {"mask": np.array(Image.open(cached)), "meta": {"cached": True}}
-            hits += 1
-        else:
+        if cache_dir is None:
             todo.append(ch)
+            continue
+        png, js = cache_paths(ch)
+        if js.exists():
+            try:
+                d = util.load_json(js)
+                generated[ch] = {"bbox": d["bbox"],
+                                 "contours": [{"pts": np.asarray(pts, float), "hole": hole}
+                                              for pts, hole in d["contours"]],
+                                 "meta": {"cached": True}}
+                hits += 1
+                continue
+            except Exception:
+                pass  # a damaged entry is just a miss
+        if png.exists():
+            # a cache from before outlines were kept: reuse the mask, but re-check the gate
+            generated[ch] = {"mask": np.array(Image.open(png)), "meta": {"cached": True}}
+            hits += 1
+            continue
+        todo.append(ch)
     rejected: dict[str, list[str]] = {}
     retried = 0
     if todo:
@@ -777,6 +830,12 @@ def build(
         if ch not in generated:
             rejected[ch] = ["no glyph survived the gate after retries"]
     for ch, g in generated.items():
+        if g.get("mask") is None:
+            # a full cache hit: the outline was traced when the glyph was first accepted
+            glyphs[ch] = {"contours": g["contours"],
+                          "bbox": g["bbox"],
+                          "meta": {**(g.get("meta") or {}), **eng.ink(size)}}
+            continue
         mask = g["mask"]
         v = verdict(mask, ch, size)
         if not v["ok"]:
@@ -785,10 +844,8 @@ def build(
         ys, xs = np.nonzero(mask > 0)
         y0, y1 = int(ys.min()), int(ys.max())
         x0, x1 = int(xs.min()), int(xs.max())
-        glyphs[ch] = {"mask": mask[y0 : y1 + 1, x0 : x1 + 1],
-                      "bbox": [x0, y0, x1 + 1, y1 + 1],
-                      # a cache hit only stores the mask, so the engine supplies the metrics again
-                      "meta": {**(g.get("meta") or {}), **eng.ink(size)}}
+        glyphs[ch] = cache_glyph(ch, mask[y0 : y1 + 1, x0 : x1 + 1], [x0, y0, x1 + 1, y1 + 1])
+        glyphs[ch]["meta"] = {**(g.get("meta") or {}), **eng.ink(size)}
 
     if rejected:
         sample = ", ".join(sorted(rejected)[:12])
