@@ -64,6 +64,10 @@ hwpdf render --profile my-hand --text-file doc.txt -o out.pdf
 
 With no `--jitter` the measured value is used: a typeset face (Hei/Song) lands around 0.35, a real running script 1.5–2.0. Fonts stay local; downloads are always explicit, and system fonts work with no network at all.
 
+<p align="center"><img src="docs/poc/canned-fonts.png" width="620" alt="the same passage set in three OFL handwriting fonts"></p>
+
+All three blocks above are the same 《兰亭序》 passage set with nothing but the font itself — **no seam, because every glyph comes from that font**. `--font` takes any TTF/OTF/TTC (including a font you made elsewhere); `--font-name` only knows the three in the catalog.
+
 ## Write a few characters, set a whole page (optional)
 
 `synth` estimates slant, stroke weight and proportions from the characters you wrote, then stamps them onto a system skeleton — so characters you never wrote still come out in your manner. Pure CPU, no download, no network.
