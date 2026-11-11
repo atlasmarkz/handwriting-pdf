@@ -20,7 +20,7 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(SKELETON.split("#")[0], size, index=index)
 
 
-MODE = os.environ.get("HWPDF_WRITER_MODE", "affine")   # affine | strokes
+MODE = os.environ.get("HWPDF_WRITER_MODE", "affine")   # affine | strokes | persp
 
 
 def _thicken_horizontal(img: Image.Image, amount: float) -> Image.Image:
@@ -47,8 +47,15 @@ def draw(ch: str, size: int = 320) -> np.ndarray:
     f = _font(int(size * 0.62))
     d.text((size // 2, int(size * 0.74)), ch, font=f, fill=255, anchor="ms")
     shear = SHEAR if MODE == "affine" else SHEAR * 0.5
-    img = img.transform((size, size), Image.AFFINE,
-                        (1, shear, -shear * size * 0.74, 0, 1, 0), resample=Image.BICUBIC)
+    if MODE == "persp":
+        # keystone: the glyph narrows towards the bottom. Not an affine map, so a global
+        # slant/weight fit cannot reproduce it — the deformation grows with y.
+        c = -shear * size * 0.74
+        img = img.transform((size, size), Image.PERSPECTIVE,
+                            (1.0, shear, c, 0.0, 1.0, 0.0, 0.0, 0.00035), resample=Image.BICUBIC)
+    else:
+        img = img.transform((size, size), Image.AFFINE,
+                            (1, shear, -shear * size * 0.74, 0, 1, 0), resample=Image.BICUBIC)
     if MODE == "strokes":
         img = _thicken_horizontal(img, WEIGHT)
     elif WEIGHT > 1:

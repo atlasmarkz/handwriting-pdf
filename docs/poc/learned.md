@@ -17,6 +17,15 @@ python scripts/train_learned.py --real hw/font.ttf -o build/learned/style.pt
 hwpdf synth build --engine external --provider examples/provider_learned.py \
   --chars "春风又绿江南岸" -o build/learned/model.ttf
 
+# 3b. 换成别的"写手"重跑（affine | strokes | persp）
+HWPDF_WRITER_MODE=persp hwpdf synth build --engine external \
+  --provider examples/provider_writer.py --charset @data/cjk-common.txt --limit 400 \
+  -o build/learned/user400p.ttf
+
+# 3c. 或用任意字体当"用户"（结构性差异实验）
+HWPDF_SRC_FONT=/System/Library/Fonts/Supplemental/Songti.ttc#0 hwpdf synth build \
+  --engine external --provider examples/provider_font.py --limit 400 -o build/learned/user400song.ttf
+
 # 4. 对比
 hwpdf synth eval --fonts build/learned/model.ttf build/learned/stylefit.ttf \
   --real hw/font.ttf --charset @build/learned/testset.txt --sheet build/learned/sheet.png
@@ -28,14 +37,20 @@ hwpdf synth eval --fonts build/learned/model.ttf build/learned/stylefit.ttf \
 `examples/provider_writer.py` 把系统黑体的每个字按固定规则加工，保证训练集和测试集用同一个"人"。
 
 - 400 个常用字，**前 360 训练、后 40 留出**（训练脚本按字体 cmap 自动取交集，缺字不会被误当成 .notdef 学进去）；
-- 两种写手：
+- 四种"写手"（同一个生成器，只换加工规则）：
   - `affine`：整体右倾 0.20 + 统一加粗 1.6 px —— 全局仿射；
-  - `strokes`：倾斜减半，但**只加粗横画**（局部规则，全局仿射表达不了）。
+  - `strokes`：倾斜减半，但**只加粗横画**（局部规则，全局仿射表达不了）；
+  - `persp`：梯形畸变（上宽下窄），**非仿射**变换，形变随高度增长；
+  - `font`：干脆拿另一种字体当"用户"（宋体当目标、黑体当骨架），是**结构性**差异，不是几何差异。
 - 模型：64×64 单通道，3 次下采样 + 跳连，192k 参数；AdamW + OneCycle，30 epoch。
 
 ![affine 写手：左=真值，中=小模型，右=stylefit](learned-affine.png)
 
 ![strokes 写手：左=真值，中=小模型，右=stylefit](learned-strokes.png)
+
+![persp 写手（非仿射）：左=真值，中=小模型，右=stylefit](learned-persp.png)
+
+![宋体当"用户"（结构性差异）：左=真值，中=小模型，右=stylefit](learned-song.png)
 
 ## 结果（40 个留出字的 IoU，越高越好）
 
@@ -44,6 +59,8 @@ hwpdf synth eval --fonts build/learned/model.ttf build/learned/stylefit.ttf \
 | affine | 0.724 | **0.954** | 解析式几乎复刻 |
 | strokes | 0.793 | **0.951** | 局部加粗也没难住解析式 |
 | affine, 128×128 / 30 epoch | 0.715 | — | 提高分辨率**没有**帮上忙 |
+| persp（非仿射梯形畸变） | 0.823 | **0.954** | 解析式依然复刻 |
+| 宋体目标、黑体骨架（结构性差异） | 0.629 | **0.937** | 连换字体都没难住解析式 |
 
 三个结论，按重要性排序：
 
@@ -52,7 +69,11 @@ hwpdf synth eval --fonts build/learned/model.ttf build/learned/stylefit.ttf \
 2. **提高分辨率不自动更好**：128×128 在同样 30 epoch 下反而低 0.08，因为每像素的有效样本变少了。
    想让学出来的模型赢，得改**表示**而不是改分辨率——比如预测笔画骨架上的位移/宽度（矢量），
    而不是猜像素；或者把模型放进"多次迭代细化"的循环里。
-3. **真正的差距要真实手写才能测出来。** 真人写字不是对系统字体的仿射变换：笔画顺序、连笔、结构
+3. **连"结构性差异"都测不出来。** 拿宋体当用户、黑体当骨架时，stylefit 仍是 0.937——因为它复刻的是
+   "骨架 + 全局参数"，而 IoU 奖励的正是结构保持：衬线尖角只占几个像素，扣分很小。这说明**在合成代理上，
+   IoU 无法区分"复制了风格"和"保住了结构"**；要靠它选模型，得先把评价换成能框住风格的东西
+   （真实样本上的人工盲测，或笔画级的宽度/弧度指标）。
+4. **真正的差距要真实手写才能测出来。** 真人写字不是对系统字体的仿射变换：笔画顺序、连笔、结构
    都会变，那时解析式会明显见顶。这个 PoC 只证明了管线是通的、CPU 是够的，**没有**证明小模型值得上。
 
 ## 成本
