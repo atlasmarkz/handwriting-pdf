@@ -6,7 +6,7 @@ license: MIT
 allowed-tools: Read Write Edit Bash
 compatibility: "Python 3.10+ with pip; dependencies (opencv-python-headless, numpy, pillow, reportlab, fonttools) are installed by install.ps1 / install.sh into a private venv. No network access at run time."
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
   category: document
 ---
 
