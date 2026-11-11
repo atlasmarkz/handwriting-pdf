@@ -137,7 +137,7 @@
 | **S5** profile/charset 集成 | 与现有工作流合体 | profile `type: synth`（记录 style hash、引擎、参数）、`--charset` 常用字预生成、缺字按需生成 | `hwpdf render` 直接吃 synth profile；同一 profile 二次渲染不触发推理 |
 | **S6** 评测与文档 | 可发布、可复现 | 自动指标脚本（SSIM/缺字率/12pt 可读性）、SKILL.md 增补、许可与隐私说明 | 指标脚本一条命令出报告；文档明确"默认本地、权重不入库" |
 
-当前状态：**S0–S3、S5、S6 完成；S4 部分完成**——接入面与「每用户小模型」PoC 已落地（`scripts/train_learned.py` + `examples/provider_learned.py`，纯 CPU 训练 2 分钟、推理 15 ms/字，详见 `docs/poc/learned.md`），但留出字 IoU 0.72–0.79 **输给**解析式基线的 0.95，结论是「管线通了、CPU 够了、表示要换（矢量而非像素）」；公开模型权重仍等许可决策。S6 交付：`hwpdf synth eval`（一条命令出报告：覆盖率 / 质量门 / 原样复用 IoU / 倾角 / 笔宽）、`tests/test_synth.py`（11 例）、`.github/workflows/ci.yml`、`docs/poc/stylefit.md`、`SKILL.md` 的 synth 章节；12pt 可读性仍是人工目检（`synth specimen` / `preview`），不做自动判分。
+当前状态：**S0–S3、S5、S6 完成；S4 部分完成**——接入面、`stylefit` 基线、每用户小模型（像素版与矢量版）都已落地，并在三套 OFL 真实手写字体上做了留出测试（360 字训练 / 40 字测试，见 `docs/poc/real-handwriting.md` 与 `docs/poc/vector-model.md`）。结论：`stylefit` 0.19–0.24（低骨架基线，等于没做事），像素模型 0.19–0.33，矢量模型 0.25–0.37（唯一三套字体全高于骨架的方法），离可用（0.8+）仍远；瓶颈是笔画级表示，不是分辨率也不是模型容量。公开模型权重仍等许可决策。S6 交付：`hwpdf synth eval`（覆盖率 / 质量门 / 原样复用 IoU / 倾角 / 笔宽）、`tests/`（含 synth/fontbuild/eval/bench/learned/vecwarp 共 57 例）、`.github/workflows/ci.yml`、`docs/poc/stylefit.md` / `learned.md` / `real-handwriting.md` / `vector-model.md`、`SKILL.md` 的 synth 章节；12pt 可读性仍是人工目检（`synth specimen` / `preview`），不做自动判分。
 
 **S3 落地细节**：质量门（`GATE`：墨量 1.2%–62%、包围盒 ≥28% 边长、贴边即裁切）+ 失败自动重采样（`--retries`，默认 1，换 seed 重画）；`meta.gate` 记录 passed/rejected/retried/attempts 与阈值；缓存 key = `engine.name.version|size|seed|SCHEMA_VERSION`，引擎 `version` 一改就自动失效；`hwpdf synth verify --font` 报覆盖率；`--no-cache` 用于基准测试。
 
@@ -160,3 +160,5 @@
 **基线修正（2026-11-11）**：合成字的墨迹底部原先被 `fontbuild` 钉到同一条基线上（对"每格一个字"的 v0.1 路径是对的），结果 `，。` 浮在字间、拉丁降部被压平。现在引擎在 glyph meta 里给出 `baseline_px`/`em_px`，`fontbuild` 据此换算真实基线（`s = EM / em_px`），没有 meta 的路径行为不变（v0.1 扫描不受影响）；标点在 em 框内居中（与黑体一致），`Engine.ink(size)` 保证缓存命中时指标不丢。120 px 实测：逗号前后空隙黑体 60/62 px、修正后 55/64 px、修正前 8/111 px。新增 `tests/test_fontbuild.py`（4 个用例，共 30 个）。
 
 **缓存修正（2026-11-11）**：① 以前生成即写缓存，被质量门拒绝的字也会留下，于是它每次都被当作命中、永远重建不出来——现在只有**通过检查**的字才写缓存；② 缓存除掩码外还存**已追踪的轮廓**（`<slug>.json`），重建 3878 字只需 1.8 s 而不是 9 s（`synth extend` 补一个字从 9 s 降到约 1.8 s）；③ 顺带发现 `_row_baselines()` 用"当前行中位数"做锚是 O(n²)（3900 字要 0.8 s），改成与行内最后一个字比较后是 8 ms。缓存键也改成对字体表取指纹（跳过 `head` 的时间戳），否则用户重跑一次 `hwpdf font` 就会让整库缓存作废。新增 5 个缓存/指纹用例（共 35 个）；现在 3878 字全量重建约 **1.5 s**。
+
+**矢量模型（2026-11-11）**：模型不再预测像素，而是预测骨架的**位移场**（64×64 平滑，±3 px）与**逐点笔画宽度**（1–6 px），渲染时把骨架的距离变换按场扭一下、保留 `距离 ≤ 宽度`，所以 320 px 输出是锐利的，上采样的只有两个平滑场。三套真实手写字体留出测试（aligned IoU）：ZhiMangXing 0.280、MaShanZheng 0.369、LongCang 0.249，均高于骨架基线与像素模型；`--base 128` 反而更差（0.253），200 epoch 只把训练集 IoU 从 0.576 推到 0.633、留出集不变——分辨率和容量都不是瓶颈。修掉两个真 bug：距离变换方向用反（`distanceTransform(mask)` 算的是到背景的距离，导致模型把背景当笔画、IoU 卡在 0.09）、`grid_sample` 越界零填充被当成「骨架上」。新增 `scripts/train_vecwarp.py`、`examples/provider_vecwarp.py`、`bench_handwriting.py --vecwarp`、`tests/test_vecwarp.py`（6 例）。

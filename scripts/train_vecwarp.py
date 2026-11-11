@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import synth  # noqa: E402
 
 BASE = 64
-MAX_SHIFT = 6.0       # px at BASE: how far a stroke may move
+MAX_SHIFT = 3.0       # px at BASE: how far a stroke may move
 W_MIN, W_MAX = 1.0, 6.0
 
 
@@ -56,13 +56,15 @@ def pairs(real: Path, chars: str, n: int = BASE) -> tuple[np.ndarray, np.ndarray
         u = _draw_small(us_font, ch, n, synth.STYLE_SCALE, synth.SF_BASELINE) > 0
         if not s.any() or not u.any():
             continue
-        dist = cv2.distanceTransform(s.astype(np.uint8), cv2.DIST_L2, 5)
+        # distance *to* the ink: zero on the skeleton, growing outwards. cv2 computes the
+        # distance of every non-zero pixel to the nearest zero, so the input is inverted.
+        dist = cv2.distanceTransform((~s).astype(np.uint8), cv2.DIST_L2, 5)
         xs.append(dist.astype(np.float32))
         ys.append(u.astype(np.float32))
     return np.asarray(xs)[:, None], np.asarray(ys)[:, None]
 
 
-def _net(torch):
+def _net(torch, max_shift: float = MAX_SHIFT):
     nn = torch.nn
 
     class Net(nn.Module):
@@ -81,7 +83,7 @@ def _net(torch):
         def forward(self, x):
             f = self.head(self.enc(x))
             f = torch.nn.functional.interpolate(f, size=x.shape[-2:], mode="bilinear", align_corners=False)
-            shift = torch.tanh(f[:, :2]) * MAX_SHIFT
+            shift = torch.tanh(f[:, :2]) * max_shift
             width = W_MIN + torch.sigmoid(f[:, 2:3]) * (W_MAX - W_MIN)
             return shift, width
 
@@ -99,8 +101,18 @@ def _grid(torch, shift):
     return torch.stack([gx, gy], dim=-1)
 
 
+def warp(x, shift, torch):
+    """Sample `x` along the field. Returns (warped, valid) — outside the canvas the distance
+    must be treated as *far away*, otherwise every border pixel looks like ink."""
+    grid = _grid(torch, shift)
+    warped = torch.nn.functional.grid_sample(x, grid, align_corners=True, padding_mode="zeros",
+                                             mode="bilinear")
+    valid = ((grid.abs() <= 1).all(dim=-1)).float().unsqueeze(1)
+    return warped, valid
+
+
 def train(real: Path, out: Path, *, chars: str, epochs: int = 60, lr: float = 2e-3,
-          seed: int = 0, threads: int = 0, batch: int = 8) -> dict:
+          seed: int = 0, threads: int = 0, batch: int = 8, base: int = BASE) -> dict:
     import torch
 
     if threads:
@@ -111,15 +123,15 @@ def train(real: Path, out: Path, *, chars: str, epochs: int = 60, lr: float = 2e
     if len(pool) < 40:
         raise SystemExit(f"only {len(pool)} usable glyphs; write more before training")
 
-    sk, us = pairs(real, "".join(pool))
+    sk, us = pairs(real, "".join(pool), n=base)
     if not len(sk):
         raise SystemExit("no glyph could be rendered from both the skeleton and your font")
-    net = _net(torch)
+    net = _net(torch, MAX_SHIFT * base / BASE)
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
     steps = math.ceil(len(sk) / batch) * epochs
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=steps)
 
-    x = torch.from_numpy(np.concatenate([sk, (sk > 0).astype(np.float32)], axis=1))
+    x = torch.from_numpy(np.concatenate([sk, (sk <= 0.5).astype(np.float32)], axis=1))
     y = torch.from_numpy(us)
     for epoch in range(epochs):
         order = torch.randperm(len(x))
@@ -128,8 +140,8 @@ def train(real: Path, out: Path, *, chars: str, epochs: int = 60, lr: float = 2e
             idx = order[i : i + batch]
             xb, yb = x[idx], y[idx]
             shift, width = net(xb)
-            dt = torch.nn.functional.grid_sample(xb[:, :1], _grid(torch, shift), align_corners=True,
-                                                 padding_mode="zeros", mode="bilinear")
+            dt, valid = warp(xb[:, :1], shift, torch)
+            dt = dt * valid + (1.0 - valid) * 40.0          # 40 = "no ink anywhere near"
             pred = torch.sigmoid((width - dt) / 0.7)
             bce = torch.nn.functional.binary_cross_entropy(pred.clamp(1e-4, 1 - 1e-4), yb)
             smooth = shift.diff(dim=-1).abs().mean() + shift.diff(dim=-2).abs().mean()
@@ -144,7 +156,8 @@ def train(real: Path, out: Path, *, chars: str, epochs: int = 60, lr: float = 2e
 
     with torch.no_grad():
         shift, width = net(x)
-        dt = torch.nn.functional.grid_sample(x[:, :1], _grid(torch, shift), align_corners=True, mode="bilinear")
+        dt, valid = warp(x[:, :1], shift, torch)
+        dt = dt * valid + (1.0 - valid) * 40.0
         pred = (torch.sigmoid((width - dt) / 0.7) > 0.5).float()
         inter = (pred * y).sum()
         union = ((pred + y) > 0).float().sum()
@@ -152,7 +165,7 @@ def train(real: Path, out: Path, *, chars: str, epochs: int = 60, lr: float = 2e
 
     ckpt = {
         "state": net.state_dict(),
-        "base": BASE,
+        "base": base,
         "skeleton": synth.skeleton_spec("cjk", "".join(pool))["path"],
         "skeleton_index": synth.skeleton_spec("cjk", "".join(pool))["index"],
         "chars": "".join(pool),
@@ -161,7 +174,7 @@ def train(real: Path, out: Path, *, chars: str, epochs: int = 60, lr: float = 2e
     }
     out.parent.mkdir(parents=True, exist_ok=True)
     torch.save(ckpt, out)
-    print(f"train IoU (64px) {iou:.3f}   {out}")
+    print(f"train IoU ({base}px) {iou:.3f}   {out}")
     return ckpt
 
 
@@ -174,10 +187,11 @@ def main(argv=None) -> int:
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--threads", type=int, default=0)
+    ap.add_argument("--base", type=int, default=BASE, help="resolution of the predicted field")
     args = ap.parse_args(argv)
     chars = synth.resolve_charset(args.charset)
     train(Path(args.real), Path(args.out), chars=chars, epochs=args.epochs, lr=args.lr,
-          seed=args.seed, threads=args.threads)
+          seed=args.seed, threads=args.threads, base=args.base)
     return 0
 
 

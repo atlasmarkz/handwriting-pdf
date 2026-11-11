@@ -103,6 +103,8 @@ bash install.sh            # macOS / Linux，默认两个目录都装
 | `hwpdf render --profile me --grow` | 排版时遇到缺字就地补进 profile 的 synth 字体 |
 | `hwpdf synth bench --style hw/font.ttf` | 量一个字形要多久：引擎 vs 矢量化，并外推到 1000 / 3755 字（CPU 预算） |
 | `python scripts/train_learned.py --real hw/font.ttf -o build/style.pt` | 用自己的字现训一个 192k 参数的小模型（纯 CPU，约 2 分钟），再用 `--engine external` 接回管线 |
+| `python scripts/train_vecwarp.py --real hw/font.ttf -o build/vw/style.pt` | 同一批字，但预测**位移场 + 笔画宽度**（矢量），320px 输出是锐利的；见 [docs/poc/vector-model.md](docs/poc/vector-model.md) |
+| `python scripts/bench_handwriting.py build/hwfonts/ZhiMangXing-Regular.ttf --vecwarp` | 同上基准，并多跑一行矢量模型 |
 | `python scripts/bench_handwriting.py build/hwfonts/ZhiMangXing-Regular.ttf` | 真实手写留出基准：拿 OFL 手写字体的 360 字当"你写过的"，比 40 个没写的字（含骨架基线） |
 | `hwpdf synth eval --font hw/synth.ttf --real hw/font.ttf -o report.md` | 出评测报告：覆盖率、质量门、原样复用 IoU、倾角/笔宽是否真的印上去了 |
 

@@ -45,8 +45,8 @@ def generate(style, chars, size=320, seed=0):
     out = {}
     for ch in chars:
         small = _skeleton_mask(ch, base, ck["skeleton"], ck["skeleton_index"])
-        dist = cv2.distanceTransform(small, cv2.DIST_L2, 5).astype(np.float32)
-        inp = np.stack([dist, small.astype(np.float32)])[None]
+        dist = cv2.distanceTransform((1 - small).astype(np.uint8), cv2.DIST_L2, 5).astype(np.float32)
+        inp = np.stack([dist, (small > 0).astype(np.float32)])[None]
         with torch.no_grad():
             shift, width = net(torch.from_numpy(inp))
         sx = float(size) / base
@@ -57,8 +57,8 @@ def generate(style, chars, size=320, seed=0):
         w = torch.nn.functional.interpolate(width, size=(size, size), mode="bilinear",
                                             align_corners=False)[0, 0].numpy() * sx
         big = _skeleton_mask(ch, size, ck["skeleton"], ck["skeleton_index"])
-        big_dist = cv2.distanceTransform(big, cv2.DIST_L2, 5).astype(np.float32)
+        big_dist = cv2.distanceTransform((1 - big).astype(np.uint8), cv2.DIST_L2, 5).astype(np.float32)
         ys, xs = np.meshgrid(np.arange(size, dtype=np.float32), np.arange(size, dtype=np.float32), indexing="ij")
-        warped = cv2.remap(big_dist, xs - dx, ys - dy, cv2.INTER_LINEAR, borderValue=0)
+        warped = cv2.remap(big_dist, xs - dx, ys - dy, cv2.INTER_LINEAR, borderValue=40)
         out[ch] = ((warped <= w) * 255).astype(np.uint8)
     return out

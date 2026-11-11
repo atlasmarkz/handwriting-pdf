@@ -83,6 +83,7 @@ def main(argv=None) -> int:
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--work", help="scratch directory (default build/bench/<font stem>)")
     ap.add_argument("--skip-learned", action="store_true", help="only run the analytic baselines")
+    ap.add_argument("--vecwarp", action="store_true", help="also train and score the vector model")
     args = ap.parse_args(argv)
 
     src = Path(args.font)
@@ -120,6 +121,17 @@ def main(argv=None) -> int:
                         "-o", str(work / "model.ttf")], check=True, env=env)
         label = f"learned {args.size}px/{args.epochs}ep"
         print(f"{label:24s} {score(real, masks(work / 'model.ttf', test))}")
+
+    if args.vecwarp:
+        subprocess.run([sys.executable, str(Path(__file__).parent / "train_vecwarp.py"),
+                        "--real", str(work / "user.ttf"), "--epochs", str(args.epochs),
+                        "-o", str(work / "vecwarp.pt")], check=True)
+        env = dict(os.environ, HWPDF_VECWARP=str(work / "vecwarp.pt"))
+        subprocess.run(["./bin/hwpdf", "synth", "build", "--engine", "external",
+                        "--provider", "examples/provider_vecwarp.py", "--style", str(work / "user.ttf"),
+                        "--charset", "@" + str(work / "test.txt"), "-o", str(work / "vecwarp.ttf")],
+                       check=True, env=env)
+        print(f"{'vecwarp (field+width)':24s} {score(real, masks(work / 'vecwarp.ttf', test))}")
     return 0
 
 
